@@ -34,7 +34,7 @@
           "swapSell": "0xbaddf265c33e41076215f6b2a92d38da12a9708d452f31f9cc942a0f6bc9cb58",
           "gaslessSwap": "0x5536a4e9be14a89d4a6e8b762d7494ce11661771a683029e8d65ba42e2c1f2ff"
         },
-        "_comment": "Unaudited. The payment and the first two swaps ran against an EARLIER vault; the address above is the current one, redeployed to add swapWithSig. Old vaults were drained before replacement."
+        "_comment": "The payment and the first two swaps ran against an EARLIER vault; the address above is the current one, redeployed to add swapWithSig. Old vaults were drained before replacement."
       }
     },
     "testnet": {

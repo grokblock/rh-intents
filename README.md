@@ -67,7 +67,7 @@ contract size limits are per-contract and modules can be split, so features
 compete for design attention rather than for bytes.
 
 **The paymaster is somebody else's problem.** Sponsored gas is a solved,
-audited standard here instead of a PDA we maintain.
+standardised piece of infrastructure here instead of a PDA we maintain.
 
 **Bundlers are optional** — and in the end not used at all. See below.
 
