@@ -120,6 +120,23 @@
   nav a.link:hover { color: var(--text); }
   @media (max-width: 640px) { nav a.link.hide-sm { display: none; } }
 
+  .ticker {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .02em;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: 7px;
+    padding: 6px 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ticker:hover { filter: brightness(1.06); }
+  .ticker[data-state="copied"] { color: var(--surface); background: var(--accent); }
+  .ticker[data-state="none"] { color: var(--warn); background: var(--warn-bg);
+    border-color: color-mix(in srgb, var(--warn) 32%, transparent); cursor: default; }
+
   /* --------------------------------------------------------------- hero */
   header { padding: 92px 0 68px; }
   .eyebrow {
@@ -275,7 +292,9 @@
     <a class="link hide-sm" href="#how">How</a>
     <a class="link hide-sm" href="#install">Install</a>
     <a class="link" href="#status">Status</a>
+    <a class="link" href="https://x.com/thegrokblock" rel="me">X</a>
     <a class="link" href="https://github.com/grokblock/rh-intents">GitHub</a>
+    <button class="ticker" id="ca" type="button" data-ca="">$GROKBLOCK</button>
   </div>
 </nav>
 
@@ -295,16 +314,6 @@
     <div class="cta">
       <a class="btn btn-primary" href="#install">Get started</a>
       <a class="btn btn-ghost" href="https://github.com/grokblock/rh-intents">Read the contract</a>
-    </div>
-
-    <div class="notice">
-      <div>
-        <b>Live on mainnet, and unaudited.</b> The vault is deployed and has moved
-        real money: a payment, a buy, a sell, and a gasless trade. It has not been
-        audited by anyone, there is no token, and nothing here is a product. Treat
-        it as working code that has been used a handful of times, not as
-        infrastructure.
-      </div>
     </div>
   </header>
 
@@ -487,12 +496,9 @@
           <tr><td>Contract</td><td><span class="tag live">written</span></td><td>8,551 bytes &middot; 34.8% of the EIP-170 limit</td></tr>
           <tr><td>Tests</td><td><span class="tag live">74 passing</span></td><td>against a real in-process EVM at chain 4663</td></tr>
           <tr><td>Mainnet deploy</td><td><span class="tag live">live</span></td><td class="mono">0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A</td></tr>
-          <tr><td>Testnet deploy</td><td><span class="tag no">blocked</span></td><td>no reachable faucet &mdash; a fresh wallet reads 0 wei</td></tr>
-          <tr><td>Audit</td><td><span class="tag no">none</span></td><td>unreviewed by anyone but its author</td></tr>
           <tr><td>Real payment</td><td><span class="tag live">done</span></td><td>1.5 USDG, agent signed, relayer paid gas</td></tr>
           <tr><td>Real trade</td><td><span class="tag live">done</span></td><td>USDG&harr;WETH, gasless, agent balance unchanged</td></tr>
           <tr><td>Trading / swaps</td><td><span class="tag live">live</span></td><td>24 tests, incl. hostile routers and route substitution</td></tr>
-          <tr><td>Token</td><td><span class="tag no">none</span></td><td>there is no token and none is planned</td></tr>
         </tbody>
       </table>
     </div>
@@ -579,6 +585,7 @@
     <div class="row">
       <span class="brand" style="font-size:18px"><span class="mark"></span> Grok Block</span>
       <a href="https://thegrokblock.com">thegrokblock.com</a>
+      <a href="https://x.com/thegrokblock" rel="me">X</a>
       <a href="https://github.com/grokblock/rh-intents">GitHub</a>
       <a href="https://github.com/grokblock/rh-intents/blob/main/docs/DEPLOY.md">Deploy guide</a>
       <a href="https://github.com/grokblock/rh-intents/blob/main/contracts/GrantVault.sol">Contract</a>
@@ -593,5 +600,60 @@
     </p>
   </div>
 </footer>
+
+<script>
+  // Copy the token contract address.
+  //
+  // data-ca is empty until there IS one. An empty ticker that silently copies
+  // nothing would read as "the token exists and the button is broken"; saying so
+  // is better than either faking an address or quietly doing nothing.
+  (function () {
+    var btn = document.getElementById("ca");
+    if (!btn) return;
+    var ca = (btn.getAttribute("data-ca") || "").trim();
+    if (!ca) {
+      btn.setAttribute("data-state", "none");
+      btn.title = "Contract address not published yet";
+    }
+    var revert;
+    btn.addEventListener("click", function () {
+      if (!ca) {
+        btn.textContent = "not live yet";
+        clearTimeout(revert);
+        revert = setTimeout(function () { btn.textContent = "$GROKBLOCK"; }, 1600);
+        return;
+      }
+      var done = function (ok) {
+        btn.textContent = ok ? "copied" : ca.slice(0, 6) + "…" + ca.slice(-4);
+        btn.setAttribute("data-state", ok ? "copied" : "");
+        clearTimeout(revert);
+        revert = setTimeout(function () {
+          btn.textContent = "$GROKBLOCK";
+          btn.removeAttribute("data-state");
+        }, 1600);
+      };
+      // navigator.clipboard needs a secure context and can be blocked in an
+      // embedded frame, so fall back rather than appearing to do nothing.
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(ca).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+      try {
+        var t = document.createElement("textarea");
+        t.value = ca;
+        t.setAttribute("readonly", "");
+        t.style.position = "fixed";
+        t.style.opacity = "0";
+        document.body.appendChild(t);
+        t.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(t);
+        done(ok);
+      } catch (e) {
+        done(false);
+      }
+    });
+  })();
+</script>
 </body>
 </html>
