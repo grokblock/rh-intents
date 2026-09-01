@@ -283,11 +283,11 @@
 
     <div class="notice">
       <div>
-        <b>Nothing is deployed yet.</b> The contract is written and tested — 50 tests
-        against a real EVM — but it is not live on either network, has not been
-        audited, and has never moved real money. There is no token, no TVL, and no
-        merchant accepting it. This page describes what the code does, not
-        something you can use today.
+        <b>Live on mainnet, and unaudited.</b> The vault is deployed and has moved
+        real money: a payment, a buy, a sell, and a gasless trade. It has not been
+        audited by anyone, there is no token, and nothing here is a product. Treat
+        it as working code that has been used a handful of times, not as
+        infrastructure.
       </div>
     </div>
   </header>
@@ -468,13 +468,14 @@
           <tr><th>Thing</th><th>State</th><th>Detail</th></tr>
         </thead>
         <tbody>
-          <tr><td>Contract</td><td><span class="tag live">written</span></td><td>11,076 bytes &middot; 45.1% of the EIP-170 limit</td></tr>
-          <tr><td>Tests</td><td><span class="tag live">67 passing</span></td><td>against a real in-process EVM at chain 4663</td></tr>
-          <tr><td>Mainnet deploy</td><td><span class="tag no">not done</span></td><td>no address exists</td></tr>
+          <tr><td>Contract</td><td><span class="tag live">written</span></td><td>8,551 bytes &middot; 34.8% of the EIP-170 limit</td></tr>
+          <tr><td>Tests</td><td><span class="tag live">74 passing</span></td><td>against a real in-process EVM at chain 4663</td></tr>
+          <tr><td>Mainnet deploy</td><td><span class="tag live">live</span></td><td class="mono">0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A</td></tr>
           <tr><td>Testnet deploy</td><td><span class="tag no">blocked</span></td><td>no reachable faucet &mdash; a fresh wallet reads 0 wei</td></tr>
           <tr><td>Audit</td><td><span class="tag no">none</span></td><td>unreviewed by anyone but its author</td></tr>
-          <tr><td>Real payment</td><td><span class="tag no">never</span></td><td>no money has moved through this</td></tr>
-          <tr><td>Trading / swaps</td><td><span class="tag live">written</span></td><td>17 tests, incl. hostile routers &mdash; never run on chain</td></tr>
+          <tr><td>Real payment</td><td><span class="tag live">done</span></td><td>1.5 USDG, agent signed, relayer paid gas</td></tr>
+          <tr><td>Real trade</td><td><span class="tag live">done</span></td><td>USDG&harr;WETH, gasless, agent balance unchanged</td></tr>
+          <tr><td>Trading / swaps</td><td><span class="tag live">live</span></td><td>24 tests, incl. hostile routers and route substitution</td></tr>
           <tr><td>Token</td><td><span class="tag no">none</span></td><td>there is no token and none is planned</td></tr>
         </tbody>
       </table>
@@ -523,12 +524,18 @@
       so nothing survives the call and revocation stays final.
     </p>
     <p>
-      It has never run against the real router. The tests use a deliberately
-      hostile stand-in placed at the real address &mdash; one that takes the input and
-      returns nothing, one that returns less than promised, one that tries to
-      overdraw the allowance, one that reverts &mdash; and the vault refuses all of
-      them. That is not the same as a live swap, and this page will say so until
-      one has happened.
+      It has now run against the real router, and two things only the live chain
+      could teach turned up. The first: an approval does not work here at all.
+      UniversalRouter never spends an allowance made to itself, so the vault
+      <em>transfers</em> the input and the route runs with
+      <span class="mono">payerIsUser = false</span> &mdash; which is strictly better,
+      because it means no allowance is created anywhere and the no-approve rule
+      holds with no exception. The second: the fork is deeper than documented.
+      <span class="mono">V3_SWAP_EXACT_IN</span> takes <strong>six</strong>
+      parameters on this chain, not the standard five. Omit the trailing one and
+      the router reads past the end of the calldata and reverts
+      <span class="mono">SliceOutOfBounds()</span>. Both were caught by simulation,
+      before any money moved.
     </p>
 
     <h2 style="margin-top:44px">Known limit</h2>

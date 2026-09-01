@@ -244,3 +244,154 @@ test("the router address is the real one, hardcoded", async () => {
     "must equal the address verified deployed on Robinhood Chain",
   );
 });
+
+// ------------------------------------------------------------------ gasless
+
+
+/** Sign a Swap intent the way the client will. */
+async function signSwap(wallet, vaultAddress, v, { agent, tokenIn, tokenOut, amountIn, minOut, routerData, deadline }) {
+  const { keccak256 } = await import("ethers");
+  const grant = await v.call("grants", [agent]);
+  const nonce = await v.call("nonces", [agent]);
+  const domain = { name: "GrantVault", version: "1", chainId: 4663, verifyingContract: vaultAddress };
+  const types = {
+    Swap: [
+      { name: "agent", type: "address" },
+      { name: "tokenIn", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "amountIn", type: "uint256" },
+      { name: "minOut", type: "uint256" },
+      { name: "routerDataHash", type: "bytes32" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "generation", type: "uint32" },
+    ],
+  };
+  const value = {
+    agent, tokenIn, tokenOut, amountIn, minOut,
+    routerDataHash: keccak256(routerData),
+    nonce, deadline, generation: Number(grant[5]),
+  };
+  return wallet.signTypedData(domain, types, value);
+}
+
+test("swapWithSig: the agent signs, the relayer pays the gas", async () => {
+  // The point of the whole exercise. Before this existed, trading required the
+  // agent to hold native token — the one property the design refuses.
+  const { chain, agent, relayer, usdg, stock, vault } = await fixture();
+  const routerData = call("swap", [usdg.address, stock.address, U(100), U(95)]);
+  const deadline = chain.time + 900n;
+  const sig = await signSwap(agent.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(100), minOut: U(90), routerData, deadline,
+  });
+
+  const r = await vault.send(relayer, "swapWithSig", [
+    agent.hex, usdg.address, stock.address, U(100), U(90), routerData, deadline, sig,
+  ]);
+  assert.equal(r.ok, true, vault.errorName(r) ?? r.error ?? "");
+  assert.equal(await stock.call("balanceOf", [vault.address]), U(95));
+  assert.equal(await vault.call("nonces", [agent.hex]), 1n);
+});
+
+test("THE attack: a relayer cannot substitute a different route", async () => {
+  // The amounts stay honest but the ROUTE changes — sending the trade through a
+  // pool the relayer controls. The router calldata is inside the signed struct
+  // as a hash precisely so this fails.
+  const { chain, agent, relayer, usdg, stock, vault } = await fixture();
+  const signed = call("swap", [usdg.address, stock.address, U(100), U(95)]);
+  const swapped = call("swap", [usdg.address, stock.address, U(100), U(91)]); // worse, still above minOut
+  const deadline = chain.time + 900n;
+  const sig = await signSwap(agent.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(100), minOut: U(90), routerData: signed, deadline,
+  });
+
+  const r = await vault.send(relayer, "swapWithSig", [
+    agent.hex, usdg.address, stock.address, U(100), U(90), swapped, deadline, sig,
+  ]);
+  assert.equal(r.ok, false, "substituted calldata must not be accepted");
+  assert.equal(vault.errorName(r), "BadSignature");
+  assert.equal(await stock.call("balanceOf", [vault.address]), 0n);
+});
+
+test("a signed swap cannot be replayed", async () => {
+  const { chain, agent, relayer, usdg, stock, vault } = await fixture();
+  const routerData = call("swap", [usdg.address, stock.address, U(100), U(95)]);
+  const deadline = chain.time + 900n;
+  const sig = await signSwap(agent.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(100), minOut: U(90), routerData, deadline,
+  });
+  const args = [agent.hex, usdg.address, stock.address, U(100), U(90), routerData, deadline, sig];
+  assert.equal((await vault.send(relayer, "swapWithSig", args)).ok, true);
+  const again = await vault.send(relayer, "swapWithSig", args);
+  assert.equal(again.ok, false);
+  assert.equal(vault.errorName(again), "BadSignature");
+  assert.equal(await stock.call("balanceOf", [vault.address]), U(95), "executed once");
+});
+
+test("revoking kills swap intents signed before it", async () => {
+  const { chain, owner, agent, relayer, usdg, stock, vault } = await fixture();
+  const routerData = call("swap", [usdg.address, stock.address, U(100), U(95)]);
+  const deadline = chain.time + 900n;
+  const sig = await signSwap(agent.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(100), minOut: U(90), routerData, deadline,
+  });
+  await vault.send(owner, "revokeGrant", [agent.hex]);
+  const r = await vault.send(relayer, "swapWithSig", [
+    agent.hex, usdg.address, stock.address, U(100), U(90), routerData, deadline, sig,
+  ]);
+  assert.equal(r.ok, false);
+  assert.equal(vault.errorName(r), "BadSignature", "the generation moved");
+});
+
+test("a swap signature from anyone but the agent is refused", async () => {
+  const { chain, agent, relayer, outsider, usdg, stock, vault } = await fixture();
+  const routerData = call("swap", [usdg.address, stock.address, U(100), U(95)]);
+  const deadline = chain.time + 900n;
+  const sig = await signSwap(outsider.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(100), minOut: U(90), routerData, deadline,
+  });
+  const r = await vault.send(relayer, "swapWithSig", [
+    agent.hex, usdg.address, stock.address, U(100), U(90), routerData, deadline, sig,
+  ]);
+  assert.equal(r.ok, false);
+  assert.equal(vault.errorName(r), "BadSignature");
+});
+
+test("an expired swap signature is refused", async () => {
+  const { chain, agent, relayer, usdg, stock, vault } = await fixture();
+  const routerData = call("swap", [usdg.address, stock.address, U(100), U(95)]);
+  const deadline = chain.time - 60n;
+  const sig = await signSwap(agent.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(100), minOut: U(90), routerData, deadline,
+  });
+  const r = await vault.send(relayer, "swapWithSig", [
+    agent.hex, usdg.address, stock.address, U(100), U(90), routerData, deadline, sig,
+  ]);
+  assert.equal(r.ok, false);
+  assert.equal(vault.errorName(r), "SignatureExpired");
+});
+
+test("a swap advances the same nonce a payment uses", async () => {
+  // One counter per agent, shared between pay and swap, so signed intents are
+  // strictly sequential. A relayer cannot hold one back and replay it later
+  // against different state.
+  const { chain, agent, relayer, usdg, stock, vault } = await fixture();
+  assert.equal(await vault.call("nonces", [agent.hex]), 0n);
+
+  const routerData = call("swap", [usdg.address, stock.address, U(10), U(10)]);
+  const deadline = chain.time + 900n;
+  const sig = await signSwap(agent.wallet, vault.address, vault, {
+    agent: agent.hex, tokenIn: usdg.address, tokenOut: stock.address,
+    amountIn: U(10), minOut: 1n, routerData, deadline,
+  });
+  await vault.send(relayer, "swapWithSig", [
+    agent.hex, usdg.address, stock.address, U(10), 1n, routerData, deadline, sig,
+  ]);
+  assert.equal(await vault.call("nonces", [agent.hex]), 1n, "a swap advances the same counter a payment does");
+});

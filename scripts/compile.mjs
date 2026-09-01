@@ -22,6 +22,11 @@ const input = {
   sources,
   settings: {
     optimizer: { enabled: true, runs: 200 },
+    // swapWithSig takes eight parameters and the legacy pipeline runs out of
+    // stack slots on it. viaIR is the documented fix and produces the same
+    // semantics through a different codegen path; the alternative was to
+    // contort the signature into a struct purely to please the old backend.
+    viaIR: true,
     // Shanghai, not Cancun. Cancun emits MCOPY/TSTORE, and anything that cannot
     // execute those turns a working contract into "invalid opcode" at runtime.
     // Shanghai is universally supported on Arbitrum-derived chains, and this

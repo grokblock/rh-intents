@@ -104,6 +104,17 @@ contract GrantVault {
     bytes32 private constant _PAY_TYPEHASH = keccak256(
         "Pay(address agent,address merchant,uint256 amount,uint256 nonce,uint256 deadline,uint32 generation)"
     );
+    /**
+     * The router calldata is inside the signed struct, as a hash.
+     *
+     * Without it a relayer could keep the agent's amounts and swap the ROUTE —
+     * sending the trade through a pool it controls and taking the difference.
+     * minOut and the tradeable allowlist bound how bad that could get, but
+     * "bounded theft" is still theft, and the agent chose a route for a reason.
+     */
+    bytes32 private constant _SWAP_TYPEHASH = keccak256(
+        "Swap(address agent,address tokenIn,address tokenOut,uint256 amountIn,uint256 minOut,bytes32 routerDataHash,uint256 nonce,uint256 deadline,uint32 generation)"
+    );
     bytes32 private immutable _DOMAIN_SEPARATOR;
     uint256 private immutable _CACHED_CHAIN_ID;
 
@@ -548,6 +559,55 @@ contract GrantVault {
         bytes calldata routerData
     ) external nonReentrant returns (uint256 received) {
         return _swap(msg.sender, tokenIn, tokenOut, amountIn, minOut, routerData);
+    }
+
+    /**
+     * Gasless trading: the agent signs, anyone relays, the relayer pays the gas.
+     *
+     * This is what makes trading keyless. Without it `swap` had to be sent by
+     * the agent itself, which meant the agent needed the native token — the one
+     * thing this whole design exists to avoid. The payment path had `payWithSig`
+     * from the start; the swap path was simply missing its twin.
+     *
+     * Shares the nonce with `payWithSig` deliberately. One counter per agent
+     * means intents are strictly sequential, so a relayer cannot reorder two
+     * signed actions or hold one back to replay later against different state.
+     */
+    function swapWithSig(
+        address agent,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minOut,
+        bytes calldata routerData,
+        uint256 deadline,
+        bytes calldata signature
+    ) external nonReentrant returns (uint256 received) {
+        if (block.timestamp > deadline) revert SignatureExpired();
+        Grant storage g = grants[agent];
+        if (g.expiresAt == 0) revert GrantMissing();
+
+        bytes32 structHash = keccak256(
+            abi.encode(
+                _SWAP_TYPEHASH,
+                agent,
+                tokenIn,
+                tokenOut,
+                amountIn,
+                minOut,
+                keccak256(routerData),
+                nonces[agent],
+                deadline,
+                g.generation
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
+        if (_recover(digest, signature) != agent) revert BadSignature();
+
+        unchecked {
+            nonces[agent] += 1;
+        }
+        return _swap(agent, tokenIn, tokenOut, amountIn, minOut, routerData);
     }
 
     function _swap(

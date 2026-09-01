@@ -13,7 +13,7 @@
  * sends nothing.
  */
 import { formatUnits, parseUnits } from "ethers";
-import { artifact, connect, erc20At, loadWallet, signPayIntent, status, vaultAt } from "./client.mjs";
+import { artifact, connect, erc20At, loadWallet, signPayIntent, signSwapIntent, status, vaultAt } from "./client.mjs";
 import { ContractFactory } from "ethers";
 
 const argv = process.argv.slice(2);
@@ -363,7 +363,7 @@ async function main() {
       console.log(`  for at least ${minHuman} of ${tokenOut}`);
       console.log(`  router    ${await v.ROUTER()}`);
       console.log(`  cap       ${metering}`);
-      console.log(`  calldata  ${data.length / 2 - 1} bytes, supplied by you`);
+      console.log(`  calldata  ${data.length / 2 - 1} bytes, supplied by you (signed, so a relayer cannot swap the route)`);
       console.log("");
       console.log(`  the vault bounds it: at most ${flags.amount} leaves, at least`);
       console.log(`  ${minHuman} must arrive, measured from real balances`);
@@ -372,9 +372,36 @@ async function main() {
       console.log("");
       return;
     }
-    const tx = await vaultAt(needVault(), agent).swap(tokenIn, tokenOut, amountIn, minOut, data);
+    // Gasless by default: the agent signs, the relayer submits and pays. The
+    // agent should never need the native token, and before swapWithSig existed
+    // it did.
+    const relayer = loadWallet(process.env.RELAYER_KEY, "RELAYER").connect(provider);
+    if (relayer.address === (await agent.getAddress())) {
+      die("AGENT_KEY and RELAYER_KEY are the same key. The agent must never be the fee payer.");
+    }
+    const { signature, deadline } = await signSwapIntent({
+      vault: v,
+      agentWallet: agent,
+      tokenIn,
+      tokenOut,
+      amountIn,
+      minOut,
+      routerData: data,
+    });
+    const tx = await vaultAt(needVault(), relayer).swapWithSig(
+      await agent.getAddress(),
+      tokenIn,
+      tokenOut,
+      amountIn,
+      minOut,
+      data,
+      deadline,
+      signature,
+    );
+    const rcpt = await tx.wait();
     console.log("");
-    console.log(`  SWAPPED  ${(await tx.wait()).hash}`);
+    console.log(`  SWAPPED  ${rcpt.hash}`);
+    console.log(`  agent ${await agent.getAddress()} signed; relayer ${relayer.address} paid the gas`);
     console.log("");
     return;
   }

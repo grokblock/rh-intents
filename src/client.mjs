@@ -16,7 +16,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Contract, JsonRpcProvider, Wallet, formatUnits, parseUnits } from "ethers";
+import { Contract, JsonRpcProvider, Wallet, formatUnits, keccak256, parseUnits } from "ethers";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -128,6 +128,60 @@ export async function signPayIntent({ vault, agentWallet, merchant, amount, dead
     agent,
     merchant,
     amount,
+    nonce,
+    deadline,
+    generation: Number(grant.generation),
+  };
+  const signature = await agentWallet.signTypedData(domain, types, value);
+  return { signature, deadline, agent, nonce, generation: Number(grant.generation) };
+}
+
+/**
+ * Sign a Swap intent, so a relayer can submit the trade and the agent never
+ * needs gas.
+ *
+ * The router calldata is signed as a HASH. Without that, a relayer could keep
+ * the agent's amounts and swap the route — pushing the trade through a pool it
+ * controls. minOut bounds the damage; it does not make the substitution
+ * acceptable.
+ */
+export async function signSwapIntent({ vault, agentWallet, tokenIn, tokenOut, amountIn, minOut, routerData, deadlineSeconds = 900 }) {
+  const agent = await agentWallet.getAddress();
+  const [grant, nonce, net] = await Promise.all([
+    vault.grants(agent),
+    vault.nonces(agent),
+    vault.runner.provider.getNetwork(),
+  ]);
+  if (grant.expiresAt === 0n) {
+    throw new Error(`no mandate exists for agent ${agent} — the owner must issue one first`);
+  }
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + deadlineSeconds);
+  const domain = {
+    name: "GrantVault",
+    version: "1",
+    chainId: Number(net.chainId),
+    verifyingContract: await vault.getAddress(),
+  };
+  const types = {
+    Swap: [
+      { name: "agent", type: "address" },
+      { name: "tokenIn", type: "address" },
+      { name: "tokenOut", type: "address" },
+      { name: "amountIn", type: "uint256" },
+      { name: "minOut", type: "uint256" },
+      { name: "routerDataHash", type: "bytes32" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint256" },
+      { name: "generation", type: "uint32" },
+    ],
+  };
+  const value = {
+    agent,
+    tokenIn,
+    tokenOut,
+    amountIn,
+    minOut,
+    routerDataHash: keccak256(routerData),
     nonce,
     deadline,
     generation: Number(grant.generation),

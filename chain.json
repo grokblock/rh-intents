@@ -24,6 +24,17 @@
         "universalRouter": "0x8876789976decbfcbbbe364623c63652db8c0904",
         "_comment": "Verified deployed (24,546 bytes) on 2026-09-01. TRAP: this is a MODIFIED Uniswap UniversalRouter fork with an extra minHopPriceX36 field in its v4 swap struct, so standard Uniswap SDK calldata REVERTS against it. Robinhood documents that two look-alike routers also exist on this chain and only this address is correct. Nothing here uses it yet.",
         "verified": "code present; ABI compatibility NOT tested"
+      },
+      "deployment": {
+        "grantVault": "0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A",
+        "deployedOn": "2026-09-01",
+        "txs": {
+          "payment": "0xc32d48e32d1e416204c921a803b89c967659a22fa62c3b57a3dfb99d487ba04a",
+          "swapBuy": "0xc454badb66dfa777071f0cb57cf41f87abd0a260a124177be58c227d9b1cd69d",
+          "swapSell": "0xbaddf265c33e41076215f6b2a92d38da12a9708d452f31f9cc942a0f6bc9cb58",
+          "gaslessSwap": "0x5536a4e9be14a89d4a6e8b762d7494ce11661771a683029e8d65ba42e2c1f2ff"
+        },
+        "_comment": "Unaudited. The payment and the first two swaps ran against an EARLIER vault; the address above is the current one, redeployed to add swapWithSig. Old vaults were drained before replacement."
       }
     },
     "testnet": {
