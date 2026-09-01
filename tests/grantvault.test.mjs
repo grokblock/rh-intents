@@ -135,8 +135,10 @@ test("an agent with no grant cannot spend", async () => {
 });
 
 test("an expiry in the past is refused at issue time", async () => {
-  const { owner, outsider, token, vault } = await fixture();
-  const past = BigInt(Math.floor(Date.now() / 1000) - 60);
+  const { chain, owner, outsider, token, vault } = await fixture();
+  // Derived from chain time, not wall clock: the contract compares against
+  // block.timestamp, and the two drift apart between fixture and assertion.
+  const past = chain.time - 60n;
   const r = await vault.send(owner, "issueGrant", [outsider.hex, token.address, USDG6(1), past]);
   assert.equal(r.ok, false);
   assert.equal(vault.errorName(r), "ExpiryInPast");
@@ -212,8 +214,11 @@ test("a signature from anyone but the agent is refused", async () => {
 });
 
 test("an expired signature is refused", async () => {
-  const { agent, relayer, merchant, vault } = await fixture();
-  const past = BigInt(Math.floor(Date.now() / 1000) - 1);
+  const { chain, agent, relayer, merchant, vault } = await fixture();
+  // Was flaky at -1 second off the wall clock: when the clock ticked between
+  // building the fixture and computing this, the deadline landed exactly on
+  // block.timestamp and "timestamp > deadline" was false. Chain time, with room.
+  const past = chain.time - 60n;
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline: past, generation: 1,
   });
@@ -388,7 +393,7 @@ test("a signed intent cannot outlive the grant that authorised it", async () => 
   // The signature deadline and the grant expiry are separate clocks. A long
   // deadline must not survive the grant running out.
   const { chain, agent, relayer, merchant, token, vault } = await fixture();
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 10 * YEAR);
+  const deadline = chain.time + BigInt(10 * YEAR);
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
