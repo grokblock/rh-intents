@@ -243,6 +243,8 @@
   tbody tr:last-child td { border-bottom: none; }
   td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
   td.mono { color: var(--muted); word-break: break-all; }
+  td a { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  td a:hover { border-bottom-color: var(--accent); }
   .tag {
     display: inline-block; padding: 2px 8px; border-radius: 5px;
     font-family: var(--mono); font-size: 11px; letter-spacing: .03em;
@@ -477,9 +479,9 @@
         <tbody>
           <tr><td>Contract</td><td><span class="tag live">written</span></td><td>8,551 bytes &middot; 34.8% of the EIP-170 limit</td></tr>
           <tr><td>Tests</td><td><span class="tag live">74 passing</span></td><td>against a real in-process EVM at chain 4663</td></tr>
-          <tr><td>Mainnet deploy</td><td><span class="tag live">live</span></td><td class="mono">0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A</td></tr>
-          <tr><td>Real payment</td><td><span class="tag live">done</span></td><td>1.5 USDG, agent signed, relayer paid gas</td></tr>
-          <tr><td>Real trade</td><td><span class="tag live">done</span></td><td>USDG&harr;WETH, gasless, agent balance unchanged</td></tr>
+          <tr><td>Mainnet deploy</td><td><span class="tag live">live</span></td><td class="mono"><a href="https://robinhoodchain.blockscout.com/address/0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A">0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A</a></td></tr>
+          <tr><td>Real payment</td><td><span class="tag live">done</span></td><td>1.5 USDG, agent signed, relayer paid gas &middot; <a href="https://robinhoodchain.blockscout.com/tx/0xc32d48e32d1e416204c921a803b89c967659a22fa62c3b57a3dfb99d487ba04a">tx</a></td></tr>
+          <tr><td>Real trade</td><td><span class="tag live">done</span></td><td>USDG&harr;WETH, gasless, agent balance unchanged to the wei &middot; <a href="https://robinhoodchain.blockscout.com/tx/0x5536a4e9be14a89d4a6e8b762d7494ce11661771a683029e8d65ba42e2c1f2ff">tx</a></td></tr>
           <tr><td>Trading / swaps</td><td><span class="tag live">live</span></td><td>24 tests, incl. hostile routers and route substitution</td></tr>
         </tbody>
       </table>
@@ -522,10 +524,20 @@
       one program.
     </p>
     <p>
-      One honest exception to a rule stated above: a swap cannot avoid an ERC-20
-      approval, because the router has to pull the input. The allowance is granted
-      for exactly the input amount and set back to zero in the same transaction,
-      so nothing survives the call and revocation stays final.
+      Trading is gasless too. The agent signs a <span class="mono">Swap</span>
+      intent and a relayer submits it, so an agent that trades still never needs
+      the native token. The router calldata is signed as a hash: without that, a
+      relayer could keep the agent's amounts and substitute the <em>route</em>,
+      pushing the trade through a pool it controls. <span class="mono">minOut</span>
+      bounds how bad that gets; it does not make it acceptable.
+    </p>
+    <p>
+      And no approval is involved at any point. UniversalRouter never spends an
+      allowance made to itself, so the input is transferred to it and the route
+      runs with <span class="mono">payerIsUser = false</span>. That is why
+      "this contract never calls <span class="mono">approve</span>" holds with no
+      exception — and why revoking a mandate cannot leave a live capability
+      behind.
     </p>
     <p>
       It has now run against the real router, and two things only the live chain
