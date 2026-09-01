@@ -6,15 +6,25 @@
     "probe": "node scripts/probe.mjs",
     "build": "node scripts/compile.mjs",
     "test": "node --test tests/*.test.mjs",
-    "cli": "node src/cli.mjs"
+    "cli": "node src/cli.mjs",
+    "prepare": "node scripts/compile.mjs"
   },
   "devDependencies": {
     "@ethereumjs/block": "^5.3.0",
-    "@ethereumjs/vm": "^8.1.1",
-    "ethers": "^6.17.0",
-    "solc": "0.8.36"
+    "@ethereumjs/vm": "^8.1.1"
   },
   "bin": {
     "rh-intents": "src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "scripts",
+    "contracts",
+    "chain.json",
+    "README.md"
+  ],
+  "dependencies": {
+    "solc": "0.8.36",
+    "ethers": "^6.17.0"
   }
 }
