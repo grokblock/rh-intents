@@ -4,162 +4,138 @@
 
 <img src="web/assets/grokblock.jpg" alt="Grok Block" width="120">
 
-Grok Chain's model — an agent that spends without ever holding a wallet — rebuilt
-for Robinhood Chain.
+A keyless agentic trading framework for Robinhood Chain. You keep the key. Your
+agent gets a *mandate* instead — the financial term for authority to act on
+someone's behalf within defined limits, which is exactly what this issues: one
+asset, a spending cap, an expiry, and a list of approved payees.
 
-You keep the key. The agent gets a *mandate* instead — the financial term for
-authority to act on someone's behalf within defined limits, which is exactly what
-this issues: one asset, a spending cap, an expiry, and a list of approved payees.
+The agent signs. The contract decides. It never holds the funds, never holds gas,
+and cannot move value anywhere you did not approve.
 
-**On "trading":** what works today is execution under a mandate — moving an
-approved asset to an approved payee without holding a key. Swaps are not built.
-The chain's router is at `0x8876789976decbfcbbbe364623c63652db8c0904` (verified
-deployed), but it is a *modified* UniversalRouter fork with an extra
-`minHopPriceX36` field, so standard Uniswap SDK calldata reverts against it, and
-look-alike routers exist on the chain. Until a swap is simulated through a
-mandate, this is not described as trading.
-
-Grok Chain stays on Solana. This is not a bridge, a fork, or a port of its code.
-None of that code runs here: Robinhood Chain is EVM, so PDAs, Anchor and CPI have
-no equivalent. What carries across is the *shape* — a human funds an account and
-issues a capped, expiring, revocable permission; an agent signs against it and
-holds nothing; a relayer pays the gas.
+Live: **https://thegrokblock.com** · **[@thegrokblock](https://x.com/thegrokblock)**
 
 Independent project. Not affiliated with Robinhood Markets, Inc. or xAI.
 
-Live: **https://mandate-lake.vercel.app** &middot; source in [`web/`](web/), a standalone file with no build step.
+## Live on mainnet
 
-## The finding that shapes everything
+| | |
+| --- | --- |
+| Vault | [`0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A`](https://robinhoodchain.blockscout.com/address/0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A) |
+| Chain | Robinhood Chain mainnet, `4663` |
+| Payment | [`0xc32d48e3…`](https://robinhoodchain.blockscout.com/tx/0xc32d48e32d1e416204c921a803b89c967659a22fa62c3b57a3dfb99d487ba04a) — agent signed, relayer paid gas |
+| Gasless trade | [`0x5536a4e9…`](https://robinhoodchain.blockscout.com/tx/0x5536a4e9be14a89d4a6e8b762d7494ce11661771a683029e8d65ba42e2c1f2ff) — agent balance unchanged to the wei |
 
-Most of what Grok Chain had to build by hand already exists here as a standard.
+That last one is the whole claim in a single number: the agent's native balance
+was `0.000062600286` before the trade and `0.000062600286` after. It signed; the
+relayer paid.
 
-Robinhood Chain is an **Arbitrum Nitro** chain (mainnet `4663`, testnet `46630`)
-and all three ERC-4337 EntryPoints are deployed, along with CREATE2, Multicall3
-and Permit2. Verified, not assumed — `scripts/probe.mjs` re-checks every address.
+## Four parties, and only one holds anything
 
-ERC-4337 is account abstraction: accounts that are contracts rather than
-keypairs, with their own validation rules. It is the same problem Grok Chain
-solved from scratch, solved generically. It even uses the same word for the same
-component.
-
-| Grok Chain (Solana) | Here (EVM) | Build? |
+| | holds | can |
 | --- | --- | --- |
-| `GrokAccount` PDA | ERC-4337 smart account | no — standard |
-| `SpendVault` PDA | the smart account holds funds directly | no |
-| `Paymaster` PDA | ERC-4337 Paymaster — same name, same job | no — standard |
-| relayer | bundler, or our own `handleOps` caller | no |
-| INTENTS router | EntryPoint | no — standard |
-| **`Grant` PDA — cap, expiry, allowlist** | **session-key permission module** | **yes — this is the work** |
-| `check_grant` CPI | `validateUserOp` hook on that module | yes |
-| `pay_token` | ERC-20 transfer authorised by the module | yes (small) |
-| merchant allowlist | allowlist inside the module | yes (small) |
-| subscriptions | same period counter, in storage | yes (small) |
+| **Owner** | the money | issue mandates, approve payees, withdraw |
+| **Vault** | the tokens | enforce the mandate |
+| **Agent** | nothing | sign intents |
+| **Relayer** | gas | submit transactions, authorise nothing |
 
-So the project is **one contract and its client**, not a chain platform. Grok
-Chain took two programs and a size fight; the equivalent here is a permission
-module of a few hundred lines.
+Value moves vault → payee in a single hop. The agent is never a stop on that
+route, not for one instruction, which is why a compromised agent key cannot drain
+anything — only spend what the mandate already allowed, to someone already
+approved.
 
-## What gets better
+## What it does
 
-**Nothing has to be cut.** Grok Chain's payments deploy was gated on a 645,048
-byte allocation, which is why the pump trade instructions were removed. EVM
-contract size limits are per-contract and modules can be split, so features
-compete for design attention rather than for bytes.
+- **Pay** — any ERC-20, metered in raw units against a hard cap
+- **Trade** — swap through the chain's router, bounded by outcome
+- **Subscribe** — recurring charges with an on-chain period counter
+- **Gasless** — the agent signs EIP-712 intents; anyone can relay them
 
-**The paymaster is somebody else's problem.** Sponsored gas is a solved,
-standardised piece of infrastructure here instead of a PDA we maintain.
+## What it deliberately cannot do
 
-**Bundlers are optional** — and in the end not used at all. See below.
+- Pay anyone not on the owner's allowlist
+- Spend past the cap, or after the mandate expires
+- Outlive a revoke — intents already signed die with the mandate
+- Hold an allowance: **the vault never calls `approve`**
 
-**USDG has 6 decimals**, same as USDC. Raw-unit spending caps carry over with
-their meaning intact — on mainnet. Testnet has neither USDG nor WETH deployed,
-so a rehearsal there needs a mock token, and a mock must never be labelled USDG.
+## Design notes
 
-## Why not ERC-4337, after all
+**No route building.** This chain runs a modified UniversalRouter whose
+`V3_SWAP_EXACT_IN` takes six parameters rather than the standard five; omit the
+trailing field and it reverts `SliceOutOfBounds()`. Encoding routes in the
+contract would break the first time the router moved. So the caller supplies the
+calldata and the contract enforces the *outcome*: at most `amountIn` may leave, at
+least `minOut` must arrive, both measured from real balances after the call. The
+router address is a constant, so caller-supplied calldata reaches exactly one
+program.
 
-The table above says the smart account and EntryPoint come free. Writing the
-thing changed the answer, so here is the correction rather than a quiet edit.
+**Transfers, not approvals.** UniversalRouter never spends an allowance made to
+itself — with `payerIsUser = false` it spends its own balance, and with `true` it
+pulls through Permit2. So the input is transferred to the router. No allowance is
+created anywhere, which means revoking a mandate cannot leave a live capability
+behind.
 
-Account abstraction is right when an agent needs a general account that can do
-arbitrary things under policy. That is not this. The agent needs exactly one
-capability — move one approved asset to an approved payee, up to a cap — and a
-purpose-built vault expresses that in a fraction of the surface a 4337 account
-plus a custom validator module would take. Less surface is the whole security
-argument, so it wins.
+**Metering is asymmetric.** Spending the mandate asset meters the cap; selling
+back into it does not, because that returns to the budget rather than spending it.
+This is what makes `revise --cap <spent>` a usable soft kill: an agent with zero
+headroom can still unwind a position, where a revoke would strand it.
 
-`payWithSig` gives the gasless property directly: the agent signs an EIP-712
-intent, anyone relays it, the relayer pays gas. No bundler, no EntryPoint, no
-paymaster deposit. A 4337 wrapper can sit on top later; the reverse is not true.
+**One asset per mandate.** A cap is one number with no idea what it is counting.
+The moment an agent can spend two denominations against one cap, the cap stops
+meaning anything.
 
-## What gets harder, and must not be waved through
+**Reentrancy.** `spent` increases *before* any external call. The ordering is the
+fix; the guard is the backstop.
 
-**Reentrancy.** Solana's account model made this mostly a non-issue; Grok Chain
-never had to think about it. Here, any external call from the module is a
-re-entry point. Checks-effects-interactions is not optional, and the metering has
-to update before the transfer, never after.
+## Known limit
 
-**Approvals are a standing grant.** Solana moves tokens with an owner signature
-per transfer. ERC-20 uses `approve`, and an unlimited approval is a permanent
-capability that outlives the session key entirely — it would quietly undo the
-whole point. The module must move funds itself, never hand out an allowance it
-does not control.
-
-**Nothing validates the account list for us.** Grok Chain's `remaining_accounts`
-were re-derived and checked on chain, and that check caught real bugs. There is
-no analogue, so wherever the client supplies addresses the contract has to
-re-derive or constrain them itself.
-
-**One asset per grant, still.** Grok Chain's cap meters a single `u64` with no
-notion of asset, so a cap only means something while an agent spends one
-denomination. That reasoning is not Solana-specific and applies here unchanged:
-one asset per session key, or the cap stops meaning anything.
-
-## Not carried over
-
-`pump_create` and the pump trade adapters are pump.fun-specific and pump.fun is
-Solana-only. If a launchpad matters here it is a different integration against
-whatever this chain has, not a port.
-
-## Status
-
-Nothing is deployed. Nothing is written beyond the verified chain facts.
-
-- [x] Chain identified and every address verified on chain
-- [x] Architecture mapped against ERC-4337
-- [x] `GrantVault` — the permission module. 6,376 bytes, **25.9% of the EIP-170 limit**
-      (the Solana equivalent was fighting for room inside 645,048)
-- [x] 50 tests against a real in-process EVM at chain id 4663, including that the
-      client and contract agree on the EIP-712 domain (they are written by hand in
-      two languages, and a mismatch fails every payment with nothing to point at)
-- [x] Client and CLI — key paths not secrets, `--plan` on everything that spends
-- [x] Subscriptions — on-chain period counter, 1-day minimum, no backfill
-- [ ] Testnet deployment on `46630` — **blocked: no reachable faucet.** A fresh
-      wallet reads 0 wei and the public endpoints 429 or need a key. This is the
-      only thing outstanding; see `docs/DEPLOY.md` — needs a mock 6-decimal ERC-20 first: USDG
-      does not exist there (both mainnet token addresses return no code on testnet)
-- [ ] One real USDG payment on mainnet
+A token that reports a successful transfer while moving nothing is **not**
+detected. The vault meters what it authorised, not what the token did. Checking
+balances before and after would catch it and would also break fee-on-transfer
+tokens, which move less on purpose. The owner chooses the token, so this is stated
+plainly and pinned in a test rather than defended against.
 
 ## Using it
 
 ```bash
-npm run build && npm test
-node src/cli.mjs                  # commands
-node src/cli.mjs status --agent 0x…
+npx -y github:grokblock/rh-intents deploy
 ```
 
-Three key files, three roles: the owner holds the money, the agent signs and
-holds nothing, the relayer pays gas and can authorise nothing. Everything that
-spends takes `--plan` and will tell you what it would do without doing it.
-
-Full walkthrough in [docs/DEPLOY.md](docs/DEPLOY.md), including how to stop an
-agent three different ways and what to check before trusting a deployed vault.
-
-## Verify before trusting
+Or from source:
 
 ```bash
-node scripts/probe.mjs            # mainnet
-node scripts/probe.mjs testnet
+git clone https://github.com/grokblock/rh-intents
+cd rh-intents && npm i
+npm run build && npm test
+npm run probe          # re-verifies every address against the live chain
+node src/cli.mjs       # commands
 ```
 
-Exits non-zero if any address in `chain.json` no longer has code, or if a token's
-decimals moved. Every claim in this README is one of those checks.
+Three key files, three roles — the split is the security model, and no key is
+ever passed as an argument:
+
+```bash
+export OWNER_KEY=./keys/owner.key      # holds the money
+export AGENT_KEY=./keys/agent.key      # signs only, holds nothing
+export RELAYER_KEY=./keys/relayer.key  # pays gas, authorises nothing
+```
+
+Everything that spends takes `--plan`, which prints what would happen and sends
+nothing. Full walkthrough in [docs/DEPLOY.md](docs/DEPLOY.md), including the three
+ways to stop an agent and what to check before trusting a deployed vault.
+
+## Tests
+
+74 against a real in-process EVM at chain id 4663, so EIP-712 domain separators
+match what deploys. The router tests use a deliberately hostile stand-in placed at
+the real router address — one that takes the input and returns nothing, one that
+underdelivers, one that tries to overdraw, one that reverts, one that succeeds
+while doing nothing — and the vault refuses every one.
+
+```bash
+npm test
+npm run probe
+npm run probe testnet
+```
+
+`probe` exits non-zero if any address in `chain.json` no longer has code, or if a
+token's decimals moved. Every factual claim in this file is one of those checks.

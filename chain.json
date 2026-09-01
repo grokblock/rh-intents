@@ -12,7 +12,7 @@
           "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
           "symbol": "USDG",
           "decimals": 6,
-          "role": "payments unit. The USDC of this chain, and 6 decimals like USDC, so raw-unit caps carry over unchanged from Grok Chain."
+          "role": "payments unit. The USDC of this chain, and 6 decimals like USDC, so raw-unit caps mean what they look like."
         },
         "WETH": {
           "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
@@ -59,7 +59,7 @@
     "safeSingletonFactory": "0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7"
   },
   "unverified": [
-    "Whether any third-party ERC-4337 bundler serves this chain. It does not block us: we run our own relayer and call EntryPoint.handleOps directly, which is the same shape as Grok Chain's relayer.",
+    "Whether any third-party ERC-4337 bundler serves this chain. It does not block anything: the relayer submits transactions directly, so no bundler is required.",
     "The native gas token and its price. Needed before any paymaster deposit sizing.",
     "What token, if any, testnet 46630 offers for payments. The probe found none at the mainnet addresses, so plan on deploying a mock.",
     "Whether the modified UniversalRouter can be driven from a vault-owned swap intent. Its calldata is non-standard, so this needs a simulated swap before any claim that trading works."

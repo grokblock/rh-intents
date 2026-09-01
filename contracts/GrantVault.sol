@@ -4,7 +4,7 @@ pragma solidity 0.8.36;
 /**
  * GrantVault — an agent spends from a human's vault without ever holding it.
  *
- * This is Grok Chain's capability model on an EVM chain. A human (the `owner`)
+ * A capability model for agent execution. A human (the `owner`)
  * funds this contract and issues a Grant to an agent key: one asset, a cap, an
  * expiry, and a list of payees the owner approved. The agent signs; the contract
  * decides. The agent never custodies the funds, never receives an allowance, and
@@ -31,8 +31,7 @@ pragma solidity 0.8.36;
  * ONE ASSET PER GRANT
  * A cap is one number and has no idea what it is counting. The moment an agent
  * can spend two denominations against one cap, the cap stops meaning anything.
- * Each grant therefore pins a token, and a second asset means a second agent —
- * the same rule the Solana original arrived at, for the same reason.
+ * Each grant therefore pins a token, and a second asset means a second agent.
  */
 
 interface IERC20 {
@@ -339,8 +338,8 @@ contract GrantVault {
      * worse failure than a missed month.
      *
      * ANYONE MAY TRIGGER ONE
-     * Unlike the Solana original, which required the agent to sign each charge,
-     * `paySubscription` is callable by anyone. Every parameter that decides where
+     * `paySubscription` is callable by anyone, rather than requiring the agent to
+     * sign each charge. Every parameter that decides where
      * the money goes — merchant, amount, period — was fixed by the owner at
      * creation, the agent's cap still meters it, and the merchant must still be
      * on the allowlist at payment time. So a caller can only ever cause a payment

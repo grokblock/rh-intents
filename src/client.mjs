@@ -1,8 +1,7 @@
 /**
  * Client for GrantVault.
  *
- * Shaped after grokchain-mcp deliberately, because those choices were the ones
- * that survived contact with a live chain:
+ * Three rules, each of which earned its place the hard way:
  *
  *   - Keys are PATHS, never inline secret material. A key pasted into an
  *     argument is in a shell history, a log, and a transcript before anyone

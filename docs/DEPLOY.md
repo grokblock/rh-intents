@@ -1,19 +1,18 @@
 # Deploying
 
-Nothing here is deployed. This is what to run when you have gas, and what to
-check before you trust it.
+How to stand up your own vault, and what to check before you trust it.
 
-## Why there is no testnet deployment yet
+A reference vault already runs on mainnet at
+`0x58B5B1800F52A494a7CEDB5b09ce97AAd41b496A`. Deploying your own costs about
+0.0015 native and takes one command.
 
-Testnet `46630` needs gas and there is no faucet reachable from this machine — a
-fresh wallet reads `0 wei` and the public devnet-style endpoints either 429 or
-require a key. That is the only thing blocking a rehearsal. The contract is
-otherwise finished and exercised: 50 tests against a real in-process EVM running
-at chain id 4663, so the EIP-712 domain separators match what will deploy.
+## A note on testnet
 
-Testnet also has **no USDG** — both mainnet token addresses return no code there.
-A rehearsal needs `MockToken` deployed first, and a mock must never be called
-USDG anywhere.
+Testnet `46630` has no faucet reachable from here — a fresh wallet reads `0 wei`
+— and **no USDG**: both mainnet token addresses return no code there. A rehearsal
+would need `MockToken` deployed first, and a mock must never be labelled USDG
+anywhere. Everything below therefore assumes mainnet, where the amounts are small
+but real.
 
 ## Keys
 
@@ -37,19 +36,26 @@ export OWNER_KEY=./keys/owner.key AGENT_KEY=./keys/agent.key RELAYER_KEY=./keys/
 payments. `AGENT_KEY` needs nothing, ever — if it ever holds a balance, something
 is wrong with how it is being used.
 
-## Rehearse on testnet
+## Deploy
 
 ```bash
-export NETWORK=testnet
+export NETWORK=mainnet
 npm run build
-node scripts/probe.mjs testnet          # every address re-verified before use
+node scripts/probe.mjs                  # every address re-verified before use
 
 node src/cli.mjs deploy --plan          # says what it would do, sends nothing
 node src/cli.mjs deploy
 export VAULT_ADDRESS=0x…                # printed by deploy
 ```
 
-Then a token to pay in. Testnet has none, so deploy a mock:
+Fund it with USDG, the chain's payments unit:
+
+```
+0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168   USDG, 6 decimals
+```
+
+If you would rather rehearse against a token of your own first, deploy a mock —
+and never describe it as USDG:
 
 ```bash
 node -e '
@@ -77,14 +83,6 @@ node src/cli.mjs pay --merchant 0xSHOP --amount 1
 
 The payment is the proof: the agent signed it, the relayer paid the gas, and the
 agent's balance never moved.
-
-## Mainnet
-
-Same commands with `NETWORK=mainnet`, and USDG as the token:
-
-```
-0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168   USDG, 6 decimals
-```
 
 Run `--plan` on everything first. It prints what would happen and sends nothing.
 
@@ -128,5 +126,9 @@ against — see the test that pins it.
 **No native-token payments.** ERC-20 only. USDG is the payments unit, so this has
 not been needed.
 
-**No swap.** Grok Chain routes through Jupiter; the equivalent here is a DEX
-integration that has not been built, and the router addresses are unverified.
+**Subscriptions have not run on chain.** The logic is tested but the on-chain
+period counter has never been exercised against a live network.
+
+**Routes are not built here.** The contract does not encode swap routes — the
+caller supplies the router calldata and the contract enforces the outcome. See
+the design notes in the README for why.
