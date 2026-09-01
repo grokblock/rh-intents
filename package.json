@@ -5,12 +5,16 @@
   "scripts": {
     "probe": "node scripts/probe.mjs",
     "build": "node scripts/compile.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "cli": "node src/cli.mjs"
   },
   "devDependencies": {
     "@ethereumjs/block": "^5.3.0",
     "@ethereumjs/vm": "^8.1.1",
     "ethers": "^6.17.0",
     "solc": "0.8.36"
+  },
+  "bin": {
+    "rh-intents": "src/cli.mjs"
   }
 }

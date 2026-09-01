@@ -111,12 +111,31 @@ Nothing is deployed. Nothing is written beyond the verified chain facts.
 - [x] Architecture mapped against ERC-4337
 - [x] `GrantVault` — the permission module. 6,376 bytes, **25.9% of the EIP-170 limit**
       (the Solana equivalent was fighting for room inside 645,048)
-- [x] 30 tests against a real in-process EVM at chain id 4663
-- [ ] Client (mirroring the grokchain-mcp shape: paths not secrets, refuse rather than guess)
-- [ ] Subscriptions (period counter, 1-day minimum — the Solana design ports directly)
-- [ ] Testnet deployment on `46630` — needs a mock 6-decimal ERC-20 first: USDG
+- [x] 50 tests against a real in-process EVM at chain id 4663, including that the
+      client and contract agree on the EIP-712 domain (they are written by hand in
+      two languages, and a mismatch fails every payment with nothing to point at)
+- [x] Client and CLI — key paths not secrets, `--plan` on everything that spends
+- [x] Subscriptions — on-chain period counter, 1-day minimum, no backfill
+- [ ] Testnet deployment on `46630` — **blocked: no reachable faucet.** A fresh
+      wallet reads 0 wei and the public endpoints 429 or need a key. This is the
+      only thing outstanding; see `docs/DEPLOY.md` — needs a mock 6-decimal ERC-20 first: USDG
       does not exist there (both mainnet token addresses return no code on testnet)
-- [ ] One real USDG payment
+- [ ] One real USDG payment on mainnet
+
+## Using it
+
+```bash
+npm run build && npm test
+node src/cli.mjs                  # commands
+node src/cli.mjs status --agent 0x…
+```
+
+Three key files, three roles: the owner holds the money, the agent signs and
+holds nothing, the relayer pays gas and can authorise nothing. Everything that
+spends takes `--plan` and will tell you what it would do without doing it.
+
+Full walkthrough in [docs/DEPLOY.md](docs/DEPLOY.md), including how to stop an
+agent three different ways and what to check before trusting a deployed vault.
 
 ## Verify before trusting
 

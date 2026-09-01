@@ -309,6 +309,162 @@ contract GrantVault {
         _safeTransfer(token, merchant, amount);
     }
 
+    // --------------------------------------------------------- subscriptions
+    /**
+     * Recurring payments, with double-charging made structurally impossible.
+     *
+     * WHY THE IDEMPOTENCY IS ON CHAIN
+     * A scheduler that records "paid" in its own database can still pay twice:
+     * it sends, crashes before writing, restarts, and sends again. No amount of
+     * client care fixes that, because the crash window is between two systems.
+     * `lastPaidPeriod` advances in the same transaction that moves the money, so
+     * a second attempt at the same period reverts. The scheduler is then free to
+     * be dumb and retry as often as it likes.
+     *
+     * MISSED PERIODS ARE NOT BACKFILLED
+     * Only the current period is payable. Offline for three months does not wake
+     * up and fire three charges — it pays the current period, and the gap stays
+     * visible in `payments` and `lastPaidPeriod`. A surprise triple charge is a
+     * worse failure than a missed month.
+     *
+     * ANYONE MAY TRIGGER ONE
+     * Unlike the Solana original, which required the agent to sign each charge,
+     * `paySubscription` is callable by anyone. Every parameter that decides where
+     * the money goes — merchant, amount, period — was fixed by the owner at
+     * creation, the agent's cap still meters it, and the merchant must still be
+     * on the allowlist at payment time. So a caller can only ever cause a payment
+     * the owner already authorised, on a schedule the owner already set. Making
+     * it permissionless removes the failure mode where a subscription silently
+     * lapses because the bot was down.
+     */
+    struct Subscription {
+        address agent;      // whose grant pays
+        address merchant;   // fixed at creation; must still be allowlisted when charged
+        uint256 amount;     // raw token units
+        uint64 periodSeconds;
+        uint64 startTime;
+        int64 lastPaidPeriod; // -1 means never paid; periods are 0-indexed from startTime
+        uint32 payments;
+        bool active;
+    }
+
+    /// A day is the shortest sane billing period. Anything faster is a drain
+    /// vector wearing a subscription's clothes.
+    uint64 public constant MIN_PERIOD_SECONDS = 1 days;
+    int64 private constant PERIOD_NONE = -1;
+
+    uint256 public nextSubscriptionId = 1;
+    mapping(uint256 => Subscription) public subscriptions;
+
+    error SubscriptionMissing();
+    error SubscriptionInactive();
+    error PeriodTooShort();
+    error PeriodMismatch(int64 asserted, int64 current);
+    error AlreadyPaidThisPeriod(int64 period);
+    error NotStarted();
+
+    event SubscriptionCreated(
+        uint256 indexed id,
+        address indexed agent,
+        address indexed merchant,
+        uint256 amount,
+        uint64 periodSeconds,
+        uint64 startTime
+    );
+    event SubscriptionPaid(uint256 indexed id, int64 period, uint256 amount, uint32 paymentsAfter);
+    event SubscriptionCancelled(uint256 indexed id, uint32 payments, int64 lastPaidPeriod);
+
+    function createSubscription(
+        address agent,
+        address merchant,
+        uint256 amount,
+        uint64 periodSeconds,
+        uint64 startTime
+    ) external onlyOwner returns (uint256 id) {
+        if (amount == 0) revert ZeroAmount();
+        if (periodSeconds < MIN_PERIOD_SECONDS) revert PeriodTooShort();
+        // A subscription may only name a payee the owner already approved, so it
+        // can never widen what the agent may pay.
+        if (!isMerchant[merchant]) revert PayeeNotAllowed(merchant);
+        if (grants[agent].expiresAt == 0) revert GrantMissing();
+
+        // A future start lets a human line the first charge up with a billing date.
+        uint64 start = startTime > block.timestamp ? startTime : uint64(block.timestamp);
+
+        id = nextSubscriptionId++;
+        subscriptions[id] = Subscription({
+            agent: agent,
+            merchant: merchant,
+            amount: amount,
+            periodSeconds: periodSeconds,
+            startTime: start,
+            lastPaidPeriod: PERIOD_NONE,
+            payments: 0,
+            active: true
+        });
+        emit SubscriptionCreated(id, agent, merchant, amount, periodSeconds, start);
+    }
+
+    /// Owner-only and immediate. The payee cannot object, delay, or require a
+    /// cancellation flow to be navigated.
+    function cancelSubscription(uint256 id) external onlyOwner {
+        Subscription storage s = subscriptions[id];
+        if (s.agent == address(0)) revert SubscriptionMissing();
+        if (!s.active) revert SubscriptionInactive();
+        s.active = false;
+        emit SubscriptionCancelled(id, s.payments, s.lastPaidPeriod);
+    }
+
+    /// Which period `block.timestamp` falls in. Reverts before the start date.
+    function currentPeriod(uint256 id) public view returns (int64) {
+        Subscription storage s = subscriptions[id];
+        if (s.agent == address(0)) revert SubscriptionMissing();
+        if (block.timestamp < s.startTime) revert NotStarted();
+        return int64(uint64((block.timestamp - s.startTime) / s.periodSeconds));
+    }
+
+    /// True when this period is payable right now. For a scheduler to check
+    /// before spending gas on a call that would revert.
+    function isDue(uint256 id) external view returns (bool due, int64 period) {
+        Subscription storage s = subscriptions[id];
+        if (s.agent == address(0) || !s.active) return (false, 0);
+        if (block.timestamp < s.startTime) return (false, 0);
+        period = int64(uint64((block.timestamp - s.startTime) / s.periodSeconds));
+        due = period > s.lastPaidPeriod;
+    }
+
+    /**
+     * Charge one period.
+     *
+     * The caller states which period it believes it is paying rather than
+     * letting the contract infer it. A scheduler whose clock has drifted then
+     * fails loudly instead of quietly charging the wrong cycle.
+     */
+    function paySubscription(uint256 id, int64 period) external nonReentrant {
+        Subscription storage s = subscriptions[id];
+        if (s.agent == address(0)) revert SubscriptionMissing();
+        if (!s.active) revert SubscriptionInactive();
+        if (block.timestamp < s.startTime) revert NotStarted();
+
+        int64 current = int64(uint64((block.timestamp - s.startTime) / s.periodSeconds));
+        if (period != current) revert PeriodMismatch(period, current);
+        // THE idempotency check. Everything below is ordinary payment logic.
+        if (period <= s.lastPaidPeriod) revert AlreadyPaidThisPeriod(period);
+
+        // Effects first, same reasoning as _pay: the token is untrusted code and
+        // must never be able to re-enter into a second charge for this period.
+        s.lastPaidPeriod = period;
+        unchecked {
+            s.payments += 1;
+        }
+        emit SubscriptionPaid(id, period, s.amount, s.payments);
+
+        // _pay re-checks the allowlist, the cap, the expiry and the revocation,
+        // so removing the merchant or revoking the grant stops the subscription
+        // without anyone having to touch the subscription itself.
+        _pay(s.agent, s.merchant, s.amount);
+    }
+
     // ----------------------------------------------------------------- views
     function remaining(address agent) external view returns (uint256) {
         Grant storage g = grants[agent];
