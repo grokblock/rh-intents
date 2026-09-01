@@ -3,7 +3,13 @@ import { test } from "node:test";
 import { Chain, Contract, KEYS, signPay } from "./helpers.mjs";
 
 const YEAR = 365 * 24 * 3600;
-const future = () => BigInt(Math.floor(Date.now() / 1000) + YEAR);
+/**
+ * Always derive from chain.time, never Date.now(). The contract compares against
+ * block.timestamp; the wall clock is a different clock, and the two drift apart
+ * by however long the fixture took to build. That drift already produced one
+ * intermittent failure in this file.
+ */
+const future = (chain) => chain.time + BigInt(YEAR);
 const USDG6 = (n) => BigInt(Math.round(n * 1e6)); // USDG has 6 decimals
 
 /** A vault with a funded token, one grant, and one approved payee. */
@@ -19,14 +25,14 @@ async function fixture({ cap = USDG6(50), tokenName = "MockToken", tokenArgs = [
   const vault = await chain.deploy(owner, "GrantVault", [owner.hex]);
 
   await token.send(owner, "mint", [vault.address, USDG6(1000)]);
-  await vault.send(owner, "issueGrant", [agent.hex, token.address, cap, future()]);
+  await vault.send(owner, "issueGrant", [agent.hex, token.address, cap, future(chain)]);
   await vault.send(owner, "addMerchant", [merchant.hex]);
 
   return { chain, owner, agent, relayer, merchant, outsider, token, vault };
 }
 
 test("the happy path: agent spends, merchant is paid, cap is metered", async () => {
-  const { agent, merchant, token, vault } = await fixture();
+  const { chain, agent, merchant, token, vault } = await fixture();
 
   const r = await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
   assert.equal(r.ok, true, r.error ?? "");
@@ -38,7 +44,7 @@ test("the happy path: agent spends, merchant is paid, cap is metered", async () 
 });
 
 test("the agent never holds the money, before or after", async () => {
-  const { agent, merchant, token, vault } = await fixture();
+  const { chain, agent, merchant, token, vault } = await fixture();
   assert.equal(await token.call("balanceOf", [agent.hex]), 0n);
   await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
   // The whole thesis: funds go vault -> merchant. The agent is never a stop
@@ -48,7 +54,7 @@ test("the agent never holds the money, before or after", async () => {
 });
 
 test("the cap is a ceiling, not a suggestion", async () => {
-  const { agent, merchant, vault, token } = await fixture({ cap: USDG6(50) });
+  const { chain, agent, merchant, vault, token } = await fixture({ cap: USDG6(50) });
   await vault.send(agent, "pay", [merchant.hex, USDG6(45)]);
 
   const over = await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
@@ -64,7 +70,7 @@ test("the cap is a ceiling, not a suggestion", async () => {
 });
 
 test("paying anyone not on the allowlist is refused", async () => {
-  const { agent, outsider, vault, token } = await fixture();
+  const { chain, agent, outsider, vault, token } = await fixture();
   const r = await vault.send(agent, "pay", [outsider.hex, USDG6(1)]);
   assert.equal(r.ok, false);
   assert.equal(vault.errorName(r), "PayeeNotAllowed");
@@ -72,7 +78,7 @@ test("paying anyone not on the allowlist is refused", async () => {
 });
 
 test("removing a merchant stops the next payment immediately", async () => {
-  const { owner, agent, merchant, vault } = await fixture();
+  const { chain, owner, agent, merchant, vault } = await fixture();
   assert.equal((await vault.send(agent, "pay", [merchant.hex, USDG6(1)])).ok, true);
   await vault.send(owner, "removeMerchant", [merchant.hex]);
   const after = await vault.send(agent, "pay", [merchant.hex, USDG6(1)]);
@@ -82,10 +88,10 @@ test("removing a merchant stops the next payment immediately", async () => {
 });
 
 test("only the owner can issue, revise, revoke, or change the allowlist", async () => {
-  const { agent, outsider, token, vault, merchant } = await fixture();
+  const { chain, agent, outsider, token, vault, merchant } = await fixture();
   const calls = [
-    ["issueGrant", [outsider.hex, token.address, USDG6(1), future()]],
-    ["reviseGrant", [agent.hex, USDG6(1), future()]],
+    ["issueGrant", [outsider.hex, token.address, USDG6(1), future(chain)]],
+    ["reviseGrant", [agent.hex, USDG6(1), future(chain)]],
     ["revokeGrant", [agent.hex]],
     ["addMerchant", [outsider.hex]],
     ["removeMerchant", [merchant.hex]],
@@ -102,10 +108,10 @@ test("revoke stops payment; revise-to-spent is the soft kill", async () => {
   // Both stop spending. The difference is that revoke marks the grant dead,
   // while a revised cap leaves it alive with zero headroom — which is what you
   // want when an agent must still be able to act, just not to spend.
-  const { owner, agent, merchant, vault } = await fixture();
+  const { chain, owner, agent, merchant, vault } = await fixture();
   await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
 
-  await vault.send(owner, "reviseGrant", [agent.hex, USDG6(10), future()]);
+  await vault.send(owner, "reviseGrant", [agent.hex, USDG6(10), future(chain)]);
   const softKilled = await vault.send(agent, "pay", [merchant.hex, 1n]);
   assert.equal(softKilled.ok, false);
   assert.equal(vault.errorName(softKilled), "CapExceeded");
@@ -120,15 +126,15 @@ test("revoke stops payment; revise-to-spent is the soft kill", async () => {
 
 test("a cap below what is already spent is refused", async () => {
   // Otherwise `spent > cap` and the headroom subtraction underflows.
-  const { owner, agent, merchant, vault } = await fixture();
+  const { chain, owner, agent, merchant, vault } = await fixture();
   await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
-  const r = await vault.send(owner, "reviseGrant", [agent.hex, USDG6(9), future()]);
+  const r = await vault.send(owner, "reviseGrant", [agent.hex, USDG6(9), future(chain)]);
   assert.equal(r.ok, false);
   assert.equal(vault.errorName(r), "CapBelowSpent");
 });
 
 test("an agent with no grant cannot spend", async () => {
-  const { outsider, merchant, vault } = await fixture();
+  const { chain, outsider, merchant, vault } = await fixture();
   const r = await vault.send(outsider, "pay", [merchant.hex, USDG6(1)]);
   assert.equal(r.ok, false);
   assert.equal(vault.errorName(r), "GrantMissing");
@@ -145,16 +151,16 @@ test("an expiry in the past is refused at issue time", async () => {
 });
 
 test("the owner cannot be its own agent", async () => {
-  const { owner, token, vault } = await fixture();
-  const r = await vault.send(owner, "issueGrant", [owner.hex, token.address, USDG6(1), future()]);
+  const { chain, owner, token, vault } = await fixture();
+  const r = await vault.send(owner, "issueGrant", [owner.hex, token.address, USDG6(1), future(chain)]);
   assert.equal(r.ok, false);
   assert.equal(vault.errorName(r), "AgentIsOwner");
 });
 
 test("spent survives re-issue, so history cannot be erased", async () => {
-  const { owner, agent, merchant, token, vault } = await fixture();
+  const { chain, owner, agent, merchant, token, vault } = await fixture();
   await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
-  await vault.send(owner, "issueGrant", [agent.hex, token.address, USDG6(100), future()]);
+  await vault.send(owner, "issueGrant", [agent.hex, token.address, USDG6(100), future(chain)]);
   const g = await vault.call("grants", [agent.hex]);
   assert.equal(g[2], USDG6(10), "spent must not reset");
   assert.equal(await vault.call("remaining", [agent.hex]), USDG6(90));
@@ -163,8 +169,8 @@ test("spent survives re-issue, so history cannot be erased", async () => {
 // ------------------------------------------------------------------ gasless
 
 test("payWithSig: the agent signs, the relayer pays the gas", async () => {
-  const { agent, relayer, merchant, token, vault } = await fixture();
-  const deadline = future();
+  const { chain, agent, relayer, merchant, token, vault } = await fixture();
+  const deadline = future(chain);
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
@@ -175,8 +181,8 @@ test("payWithSig: the agent signs, the relayer pays the gas", async () => {
 });
 
 test("a relayed intent cannot be replayed", async () => {
-  const { agent, relayer, merchant, token, vault } = await fixture();
-  const deadline = future();
+  const { chain, agent, relayer, merchant, token, vault } = await fixture();
+  const deadline = future(chain);
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
@@ -190,8 +196,8 @@ test("a relayed intent cannot be replayed", async () => {
 test("revoking kills intents signed before it", async () => {
   // The generation is inside the signed struct, so a revoke invalidates
   // anything already in flight rather than only future requests.
-  const { owner, agent, relayer, merchant, token, vault } = await fixture();
-  const deadline = future();
+  const { chain, owner, agent, relayer, merchant, token, vault } = await fixture();
+  const deadline = future(chain);
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
@@ -203,8 +209,8 @@ test("revoking kills intents signed before it", async () => {
 });
 
 test("a signature from anyone but the agent is refused", async () => {
-  const { agent, relayer, outsider, merchant, vault } = await fixture();
-  const deadline = future();
+  const { chain, agent, relayer, outsider, merchant, vault } = await fixture();
+  const deadline = future(chain);
   const { signature } = await signPay(outsider.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
@@ -229,8 +235,8 @@ test("an expired signature is refused", async () => {
 
 test("the signed amount is the amount paid", async () => {
   // Sign for 7, submit 70. The relayer is not trusted with the number.
-  const { agent, relayer, merchant, token, vault } = await fixture();
-  const deadline = future();
+  const { chain, agent, relayer, merchant, token, vault } = await fixture();
+  const deadline = future(chain);
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
@@ -241,9 +247,9 @@ test("the signed amount is the amount paid", async () => {
 });
 
 test("the signed merchant is the merchant paid", async () => {
-  const { owner, agent, relayer, merchant, outsider, token, vault } = await fixture();
+  const { chain, owner, agent, relayer, merchant, outsider, token, vault } = await fixture();
   await vault.send(owner, "addMerchant", [outsider.hex]); // both are allowed payees
-  const deadline = future();
+  const deadline = future(chain);
   const { signature } = await signPay(agent.wallet, vault.address, {
     agent: agent.hex, merchant: merchant.hex, amount: USDG6(7), nonce: 0n, deadline, generation: 1,
   });
@@ -262,7 +268,7 @@ test("reentrancy during transfer cannot spend the headroom twice", async () => {
   const evil = await chain.deploy(owner, "ReentrantToken", []);
   const vault = await chain.deploy(owner, "GrantVault", [owner.hex]);
   await evil.send(owner, "mint", [vault.address, USDG6(1000)]);
-  await vault.send(owner, "issueGrant", [agent.hex, evil.address, USDG6(50), future()]);
+  await vault.send(owner, "issueGrant", [agent.hex, evil.address, USDG6(50), future(chain)]);
   await vault.send(owner, "addMerchant", [merchant.hex]);
   await evil.send(owner, "arm", [vault.address, merchant.hex]);
 
@@ -281,7 +287,7 @@ test("a token that returns nothing still works", async () => {
   const token = await chain.deploy(owner, "NoReturnToken", []);
   const vault = await chain.deploy(owner, "GrantVault", [owner.hex]);
   await token.send(owner, "mint", [vault.address, USDG6(1000)]);
-  await vault.send(owner, "issueGrant", [agent.hex, token.address, USDG6(50), future()]);
+  await vault.send(owner, "issueGrant", [agent.hex, token.address, USDG6(50), future(chain)]);
   await vault.send(owner, "addMerchant", [merchant.hex]);
 
   const r = await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
@@ -300,7 +306,7 @@ test("KNOWN LIMIT: a token that lies about transferring is not detected", async 
   const liar = await chain.deploy(owner, "LyingToken", []);
   const vault = await chain.deploy(owner, "GrantVault", [owner.hex]);
   await liar.send(owner, "mint", [vault.address, USDG6(1000)]);
-  await vault.send(owner, "issueGrant", [agent.hex, liar.address, USDG6(50), future()]);
+  await vault.send(owner, "issueGrant", [agent.hex, liar.address, USDG6(50), future(chain)]);
   await vault.send(owner, "addMerchant", [merchant.hex]);
 
   const r = await vault.send(agent, "pay", [merchant.hex, USDG6(10)]);
@@ -342,7 +348,7 @@ test("the merchant list is capped and stays consistent through removals", async 
 });
 
 test("adding the same merchant twice does not duplicate it", async () => {
-  const { owner, merchant, vault } = await fixture();
+  const { chain, owner, merchant, vault } = await fixture();
   assert.equal(await vault.call("merchantCount", []), 1n);
   await vault.send(owner, "addMerchant", [merchant.hex]);
   assert.equal(await vault.call("merchantCount", []), 1n);
@@ -351,7 +357,7 @@ test("adding the same merchant twice does not duplicate it", async () => {
 // ---------------------------------------------------------------- ownership
 
 test("ownership transfer is two-step", async () => {
-  const { owner, outsider, vault } = await fixture();
+  const { chain, owner, outsider, vault } = await fixture();
   await vault.send(owner, "transferOwnership", [outsider.hex]);
   // Still the old owner until accepted — a mistyped address cannot brick it.
   assert.equal((await vault.call("owner", [])).toLowerCase(), owner.hex.toLowerCase());

@@ -483,13 +483,24 @@ contract GrantVault {
      * cannot have done worse than the bounds. The router address is a constant,
      * so "arbitrary calldata" reaches exactly one program, never an attacker's.
      *
-     * THE APPROVAL, AND AN HONEST EXCEPTION
-     * Elsewhere this contract never calls `approve`, because an allowance is a
-     * standing capability that outlives revocation. A swap cannot avoid one — the
-     * router has to pull the input. So the allowance is granted for exactly
-     * `amountIn` and set back to zero in the same transaction, before it returns.
-     * No allowance survives the call, which keeps the property that mattered:
-     * revoking a mandate cannot leave a live capability behind.
+     * HOW THE ROUTER GETS PAID, AND WHY NOT BY APPROVAL
+     * An earlier version approved the router for exactly `amountIn` and cleared
+     * the allowance afterwards. Against the live router that does not work at
+     * all, and finding out cost a simulation rather than money: UniversalRouter
+     * never spends an allowance made to itself. With `payerIsUser = false` it
+     * spends only its OWN balance, and with `true` it pulls through Permit2 —
+     * a contract this vault has no reason to approve, since a Permit2 allowance
+     * is exactly the standing capability the design refuses to leave lying about.
+     *
+     * So the input is TRANSFERRED to the router and the route runs with
+     * `payerIsUser = false`. That is not a workaround; it is strictly better.
+     * No allowance is created at any point, so the rule holds everywhere with no
+     * exception, and a revoked mandate cannot leave a live capability behind.
+     *
+     * The cost is that a route consuming less than it was given strands the
+     * remainder in the router. That is bounded by `amountIn` and visible in the
+     * `spent` figure this function reports, and a caller who cares should append
+     * a SWEEP command to their calldata to send the dust back.
      *
      * METERING, AND WHY SELLING IS FREE
      * Spending the mandate's asset meters the cap. Selling something back INTO
@@ -574,15 +585,13 @@ contract GrantVault {
         uint256 inBefore = _balanceOf(tokenIn);
         uint256 outBefore = _balanceOf(tokenOut);
 
-        // Exact allowance, and it does not outlive this call. Some tokens refuse
-        // a non-zero-to-non-zero approve, so clear first.
-        _safeApprove(tokenIn, ROUTER, 0);
-        _safeApprove(tokenIn, ROUTER, amountIn);
+        // Hand the router the input outright. It spends its own balance when the
+        // route is built with payerIsUser = false; an allowance would simply be
+        // ignored. Nothing is approved, here or anywhere else in this contract.
+        _safeTransfer(tokenIn, ROUTER, amountIn);
 
         (bool ok, ) = ROUTER.call(routerData);
         if (!ok) revert RouterCallFailed();
-
-        _safeApprove(tokenIn, ROUTER, 0);
 
         // Believe balances, not the router. A return value is whatever the
         // callee felt like saying; these two numbers are what actually happened.
@@ -602,12 +611,6 @@ contract GrantVault {
         // unbounded swap is the thing this function exists to prevent.
         if (!ok || data.length < 32) revert TransferFailed();
         return abi.decode(data, (uint256));
-    }
-
-    function _safeApprove(address token, address spender, uint256 amount) private {
-        (bool ok, bytes memory data) =
-            token.call(abi.encodeWithSelector(0x095ea7b3, spender, amount));
-        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
     }
 
     // ----------------------------------------------------------------- views

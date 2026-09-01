@@ -20,20 +20,19 @@ interface IMintable {
  * router DOES to balances afterwards.
  */
 contract MockRouter {
-    /// Pull `amountIn` of `tokenIn` and hand back `amountOut` of `tokenOut`.
+    /// Spend the input the caller already TRANSFERRED to us and hand back
+    /// `amountOut`. Mirrors UniversalRouter with payerIsUser = false, which is
+    /// the only mode that works from a contract that holds its own funds.
     function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOut) external {
-        IMintable(tokenIn).transferFrom(msg.sender, address(this), amountIn);
+        require(IMintable(tokenIn).balanceOf(address(this)) >= amountIn, "router was not paid");
         IMintable(tokenOut).mint(msg.sender, amountOut);
     }
 
-    /// Take the input and give nothing back. Should trip minOut.
-    function steal(address tokenIn, uint256 amountIn) external {
-        IMintable(tokenIn).transferFrom(msg.sender, address(this), amountIn);
-    }
+    /// Keep the input and give nothing back. Should trip minOut.
+    function steal(address, uint256) external {}
 
-    /// Take MORE than authorised, if the allowance permits it. Should trip
-    /// Overspent — and must not be possible at all, since the vault approves
-    /// exactly amountIn.
+    /// Try to take MORE than it was handed, by pulling an allowance. Must fail:
+    /// the vault approves nothing, so there is no allowance to pull.
     function overdraw(address tokenIn, uint256 amountIn) external {
         IMintable(tokenIn).transferFrom(msg.sender, address(this), amountIn);
     }
