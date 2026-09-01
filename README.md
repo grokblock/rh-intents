@@ -1,7 +1,13 @@
-# Intents on Robinhood Chain
+# Mandate
 
-Grok Chain's model — **an agent that spends money without ever holding a wallet**
-— rebuilt for Robinhood Chain.
+**Let a bot spend your money without giving it your money.**
+
+Grok Chain's model — an agent that spends without ever holding a wallet — rebuilt
+for Robinhood Chain.
+
+The name is the idea: in finance a *mandate* is authority to act on someone's
+behalf within defined limits. That is exactly what this issues — one asset, a
+spending cap, an expiry, and a list of who may be paid.
 
 Grok Chain stays on Solana. This is not a bridge, a fork, or a port of its code.
 None of that code runs here: Robinhood Chain is EVM, so PDAs, Anchor and CPI have
@@ -9,8 +15,10 @@ no equivalent. What carries across is the *shape* — a human funds an account a
 issues a capped, expiring, revocable permission; an agent signs against it and
 holds nothing; a relayer pays the gas.
 
-Working name. Deliberately not Robinhood-branded — this is not their product and
-should not read as if it were.
+Deliberately not Robinhood-branded: this is an independent project, not their
+product, and should never read as if it were.
+
+Landing page: [`web/index.html`](web/index.html) — a standalone file, no build step.
 
 ## The finding that shapes everything
 
