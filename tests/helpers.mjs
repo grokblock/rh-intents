@@ -171,6 +171,15 @@ export async function signPay(wallet, vaultAddress, { agent, merchant, amount, n
   };
 }
 
+/**
+ * PUBLIC TEST VECTORS. These are the standard Hardhat/Anvil development keys —
+ * they are in every tutorial and every CI log on the internet, and they exist
+ * here only so the local EVM has deterministic addresses.
+ *
+ * Anything sent to these addresses on a real network is gone. Never put a real
+ * key in this file; the CLI reads keys from paths precisely so they never end
+ * up in source.
+ */
 export const KEYS = {
   owner: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
   agent: "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba",
