@@ -1,13 +1,23 @@
-# Mandate
+# Grok Block
 
-**Let a bot spend your money without giving it your money.**
+**Agents act on chain without owning the key.**
+
+<img src="web/assets/grokblock.jpg" alt="Grok Block" width="120">
 
 Grok Chain's model — an agent that spends without ever holding a wallet — rebuilt
 for Robinhood Chain.
 
-The name is the idea: in finance a *mandate* is authority to act on someone's
-behalf within defined limits. That is exactly what this issues — one asset, a
-spending cap, an expiry, and a list of who may be paid.
+You keep the key. The agent gets a *mandate* instead — the financial term for
+authority to act on someone's behalf within defined limits, which is exactly what
+this issues: one asset, a spending cap, an expiry, and a list of approved payees.
+
+**On "trading":** what works today is execution under a mandate — moving an
+approved asset to an approved payee without holding a key. Swaps are not built.
+The chain's router is at `0x8876789976decbfcbbbe364623c63652db8c0904` (verified
+deployed), but it is a *modified* UniversalRouter fork with an extra
+`minHopPriceX36` field, so standard Uniswap SDK calldata reverts against it, and
+look-alike routers exist on the chain. Until a swap is simulated through a
+mandate, this is not described as trading.
 
 Grok Chain stays on Solana. This is not a bridge, a fork, or a port of its code.
 None of that code runs here: Robinhood Chain is EVM, so PDAs, Anchor and CPI have
@@ -15,10 +25,9 @@ no equivalent. What carries across is the *shape* — a human funds an account a
 issues a capped, expiring, revocable permission; an agent signs against it and
 holds nothing; a relayer pays the gas.
 
-Deliberately not Robinhood-branded: this is an independent project, not their
-product, and should never read as if it were.
+Independent project. Not affiliated with Robinhood Markets, Inc. or xAI.
 
-Landing page: [`web/index.html`](web/index.html) — a standalone file, no build step.
+Live: **https://mandate-lake.vercel.app** &middot; source in [`web/`](web/), a standalone file with no build step.
 
 ## The finding that shapes everything
 

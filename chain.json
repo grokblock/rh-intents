@@ -19,6 +19,11 @@
           "symbol": "WETH",
           "decimals": 18
         }
+      },
+      "dex": {
+        "universalRouter": "0x8876789976decbfcbbbe364623c63652db8c0904",
+        "_comment": "Verified deployed (24,546 bytes) on 2026-09-01. TRAP: this is a MODIFIED Uniswap UniversalRouter fork with an extra minHopPriceX36 field in its v4 swap struct, so standard Uniswap SDK calldata REVERTS against it. Robinhood documents that two look-alike routers also exist on this chain and only this address is correct. Nothing here uses it yet.",
+        "verified": "code present; ABI compatibility NOT tested"
       }
     },
     "testnet": {
@@ -46,6 +51,6 @@
     "Whether any third-party ERC-4337 bundler serves this chain. It does not block us: we run our own relayer and call EntryPoint.handleOps directly, which is the same shape as Grok Chain's relayer.",
     "The native gas token and its price. Needed before any paymaster deposit sizing.",
     "What token, if any, testnet 46630 offers for payments. The probe found none at the mainnet addresses, so plan on deploying a mock.",
-    "DEX router addresses on either network. Needed only for a swap intent, not for payments."
+    "Whether the modified UniversalRouter can be driven from a vault-owned swap intent. Its calldata is non-standard, so this needs a simulated swap before any claim that trading works."
   ]
 }
