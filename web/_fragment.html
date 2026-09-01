@@ -105,6 +105,21 @@
   nav a.link:hover { color: var(--text); }
   @media (max-width: 640px) { nav a.link.hide-sm { display: none; } }
 
+  .ticker {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .02em;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: 7px;
+    padding: 6px 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ticker:hover { filter: brightness(1.06); }
+  .ticker[data-state="copied"] { color: var(--surface); background: var(--accent); }
+
   /* --------------------------------------------------------------- hero */
   header { padding: 92px 0 68px; }
   .eyebrow {
@@ -263,6 +278,7 @@
     <a class="link" href="#status">Status</a>
     <a class="link" href="https://x.com/thegrokblock" rel="me">X</a>
     <a class="link" href="https://github.com/grokblock/rh-intents">GitHub</a>
+    <button class="ticker" id="ca" type="button" data-ca="0x3f41d48aad0492eec195df1bf313b7628d3c80de" title="Copy contract address">$GROKBLOCK</button>
   </div>
 </nav>
 
@@ -481,6 +497,7 @@
           <tr><td>Testnet</td><td class="mono">chain 46630 &middot; rpc.testnet.chain.robinhood.com</td></tr>
           <tr><td>Stack</td><td class="mono">Arbitrum Nitro, EVM</td></tr>
           <tr><td>Payments unit</td><td class="mono">USDG &middot; 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168 &middot; 6 decimals</td></tr>
+          <tr><td>$GROKBLOCK</td><td class="mono"><a href="https://robinhoodchain.blockscout.com/token/0x3f41d48aad0492eec195df1bf313b7628d3c80de">0x3f41d48aad0492eec195df1bf313b7628d3c80de</a> &middot; 18 decimals</td></tr>
           <tr><td>USDG on testnet</td><td class="mono">does not exist &mdash; a rehearsal needs a mock token first</td></tr>
         </tbody>
       </table>
@@ -577,3 +594,48 @@
     </p>
   </div>
 </footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById("ca");
+    if (!btn) return;
+    var ca = (btn.getAttribute("data-ca") || "").trim();
+    if (!ca) return;
+    var revert;
+    var show = function (label, state) {
+      btn.textContent = label;
+      if (state) btn.setAttribute("data-state", state);
+      clearTimeout(revert);
+      revert = setTimeout(function () {
+        btn.textContent = "$GROKBLOCK";
+        btn.removeAttribute("data-state");
+      }, 1600);
+    };
+    btn.addEventListener("click", function () {
+      // navigator.clipboard needs a secure context and is blocked in some
+      // embedded frames. Falling back matters: this button looking dead is
+      // exactly the failure people would notice and nobody would report.
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(ca).then(
+          function () { show("copied", "copied"); },
+          function () { show(ca.slice(0, 6) + "\u2026" + ca.slice(-4)); }
+        );
+        return;
+      }
+      try {
+        var t = document.createElement("textarea");
+        t.value = ca;
+        t.setAttribute("readonly", "");
+        t.style.position = "fixed";
+        t.style.opacity = "0";
+        document.body.appendChild(t);
+        t.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(t);
+        show(ok ? "copied" : ca.slice(0, 6) + "\u2026" + ca.slice(-4), ok ? "copied" : null);
+      } catch (e) {
+        show(ca.slice(0, 6) + "\u2026" + ca.slice(-4));
+      }
+    });
+  })();
+</script>

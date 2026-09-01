@@ -18,6 +18,12 @@
           "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
           "symbol": "WETH",
           "decimals": 18
+        },
+        "GROKBLOCK": {
+          "address": "0x3f41d48aAd0492EEc195Df1bf313b7628d3C80de",
+          "symbol": "GROKBLOCK",
+          "decimals": 18,
+          "role": "project token. Not used by the contracts — the vault neither holds nor requires it."
         }
       },
       "dex": {
