@@ -52,13 +52,27 @@ compete for design attention rather than for bytes.
 **The paymaster is somebody else's problem.** Sponsored gas is a solved,
 audited standard here instead of a PDA we maintain.
 
-**Bundlers are optional.** If no third-party bundler serves this chain we call
-`EntryPoint.handleOps` from our own relayer — which is exactly Grok Chain's
-model anyway, so a missing bundler costs nothing.
+**Bundlers are optional** — and in the end not used at all. See below.
 
 **USDG has 6 decimals**, same as USDC. Raw-unit spending caps carry over with
 their meaning intact — on mainnet. Testnet has neither USDG nor WETH deployed,
 so a rehearsal there needs a mock token, and a mock must never be labelled USDG.
+
+## Why not ERC-4337, after all
+
+The table above says the smart account and EntryPoint come free. Writing the
+thing changed the answer, so here is the correction rather than a quiet edit.
+
+Account abstraction is right when an agent needs a general account that can do
+arbitrary things under policy. That is not this. The agent needs exactly one
+capability — move one approved asset to an approved payee, up to a cap — and a
+purpose-built vault expresses that in a fraction of the surface a 4337 account
+plus a custom validator module would take. Less surface is the whole security
+argument, so it wins.
+
+`payWithSig` gives the gasless property directly: the agent signs an EIP-712
+intent, anyone relays it, the relayer pays gas. No bundler, no EntryPoint, no
+paymaster deposit. A 4337 wrapper can sit on top later; the reverse is not true.
 
 ## What gets harder, and must not be waved through
 
@@ -95,8 +109,11 @@ Nothing is deployed. Nothing is written beyond the verified chain facts.
 
 - [x] Chain identified and every address verified on chain
 - [x] Architecture mapped against ERC-4337
-- [ ] Session-key permission module
+- [x] `GrantVault` — the permission module. 6,376 bytes, **25.9% of the EIP-170 limit**
+      (the Solana equivalent was fighting for room inside 645,048)
+- [x] 30 tests against a real in-process EVM at chain id 4663
 - [ ] Client (mirroring the grokchain-mcp shape: paths not secrets, refuse rather than guess)
+- [ ] Subscriptions (period counter, 1-day minimum — the Solana design ports directly)
 - [ ] Testnet deployment on `46630` — needs a mock 6-decimal ERC-20 first: USDG
       does not exist there (both mainnet token addresses return no code on testnet)
 - [ ] One real USDG payment
