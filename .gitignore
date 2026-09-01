@@ -4,3 +4,7 @@ node_modules/
 out/
 cache/
 broadcast/
+
+.vercel
+
+.vercel/
