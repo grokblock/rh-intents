@@ -8,3 +8,5 @@ broadcast/
 .vercel
 
 .vercel/
+keys/
+*.key

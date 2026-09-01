@@ -465,6 +465,151 @@ contract GrantVault {
         _pay(s.agent, s.merchant, s.amount);
     }
 
+    // ----------------------------------------------------------------- swap
+    /**
+     * Trade from inside the mandate.
+     *
+     * WHY THE CONTRACT DOES NOT BUILD THE SWAP
+     * This chain's router is a MODIFIED UniversalRouter: its v4 swap struct
+     * carries an extra `minHopPriceX36` field, so calldata produced by the
+     * standard Uniswap SDK reverts against it, and the encoding is free to
+     * change again without warning. A contract that encoded routes itself would
+     * be wrong the first time the router moved.
+     *
+     * So the caller supplies the router calldata and this contract enforces the
+     * OUTCOME instead: at most `amountIn` may leave, at least `minOut` must
+     * arrive, and both are measured from real balances after the call rather
+     * than believed from a return value. Whatever the router did in between, it
+     * cannot have done worse than the bounds. The router address is a constant,
+     * so "arbitrary calldata" reaches exactly one program, never an attacker's.
+     *
+     * THE APPROVAL, AND AN HONEST EXCEPTION
+     * Elsewhere this contract never calls `approve`, because an allowance is a
+     * standing capability that outlives revocation. A swap cannot avoid one — the
+     * router has to pull the input. So the allowance is granted for exactly
+     * `amountIn` and set back to zero in the same transaction, before it returns.
+     * No allowance survives the call, which keeps the property that mattered:
+     * revoking a mandate cannot leave a live capability behind.
+     *
+     * METERING, AND WHY SELLING IS FREE
+     * Spending the mandate's asset meters the cap. Selling something back INTO
+     * the mandate asset meters nothing, because it does not spend the budget — it
+     * returns to it. That asymmetry is what makes `reviseGrant(cap = spent)` a
+     * usable soft kill: an agent with no headroom can still unwind a position it
+     * already holds, where a revoke would strand it.
+     */
+    address public constant ROUTER = 0x8876789976dEcBfCbBbe364623C63652db8C0904;
+
+    /// Tokens the agent may hold as swap output. An output token that is not on
+    /// this list is a drain vector wearing a trade's clothes: sell the mandate
+    /// asset for one wei of something worthless and the value is gone while the
+    /// cap looks respected.
+    mapping(address => bool) public isTradeable;
+
+    error TokenNotTradeable(address token);
+    error SwapSameToken();
+    error Overspent(uint256 spent, uint256 allowed);
+    error MinOutNotMet(uint256 received, uint256 required);
+    error RouterCallFailed();
+    error EmptyRouterData();
+
+    event TradeableSet(address indexed token, bool allowed);
+    event Swapped(
+        address indexed agent,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 spent,
+        uint256 received,
+        uint256 meteredAgainstCap
+    );
+
+    function setTradeable(address token, bool allowed) external onlyOwner {
+        if (token == address(0)) revert ZeroAddress();
+        isTradeable[token] = allowed;
+        emit TradeableSet(token, allowed);
+    }
+
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minOut,
+        bytes calldata routerData
+    ) external nonReentrant returns (uint256 received) {
+        return _swap(msg.sender, tokenIn, tokenOut, amountIn, minOut, routerData);
+    }
+
+    function _swap(
+        address agent,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 minOut,
+        bytes calldata routerData
+    ) private returns (uint256 received) {
+        if (amountIn == 0) revert ZeroAmount();
+        if (routerData.length == 0) revert EmptyRouterData();
+        if (tokenIn == tokenOut) revert SwapSameToken();
+
+        Grant storage g = grants[agent];
+        if (g.expiresAt == 0) revert GrantMissing();
+        if (g.revoked) revert GrantRevoked();
+        if (block.timestamp > g.expiresAt) revert GrantExpired();
+
+        // Both sides must be assets the owner chose. The mandate asset is
+        // implicitly tradeable — it is already the thing the cap is denominated
+        // in — but anything else needs approving first.
+        if (tokenIn != g.token && !isTradeable[tokenIn]) revert TokenNotTradeable(tokenIn);
+        if (tokenOut != g.token && !isTradeable[tokenOut]) revert TokenNotTradeable(tokenOut);
+
+        // Spending the mandate asset costs cap. Coming back to it costs nothing.
+        uint256 metered = tokenIn == g.token ? amountIn : 0;
+        if (metered != 0) {
+            uint256 headroom = g.cap - g.spent;
+            if (metered > headroom) revert CapExceeded(metered, headroom);
+            // Effects before the external call, exactly as in _pay.
+            g.spent += metered;
+        }
+
+        uint256 inBefore = _balanceOf(tokenIn);
+        uint256 outBefore = _balanceOf(tokenOut);
+
+        // Exact allowance, and it does not outlive this call. Some tokens refuse
+        // a non-zero-to-non-zero approve, so clear first.
+        _safeApprove(tokenIn, ROUTER, 0);
+        _safeApprove(tokenIn, ROUTER, amountIn);
+
+        (bool ok, ) = ROUTER.call(routerData);
+        if (!ok) revert RouterCallFailed();
+
+        _safeApprove(tokenIn, ROUTER, 0);
+
+        // Believe balances, not the router. A return value is whatever the
+        // callee felt like saying; these two numbers are what actually happened.
+        uint256 spent = inBefore - _balanceOf(tokenIn);
+        received = _balanceOf(tokenOut) - outBefore;
+
+        if (spent > amountIn) revert Overspent(spent, amountIn);
+        if (received < minOut) revert MinOutNotMet(received, minOut);
+
+        emit Swapped(agent, tokenIn, tokenOut, spent, received, metered);
+    }
+
+    function _balanceOf(address token) private view returns (uint256) {
+        (bool ok, bytes memory data) =
+            token.staticcall(abi.encodeWithSelector(IERC20.balanceOf.selector, address(this)));
+        // A token whose balance cannot be read cannot be bounded, and an
+        // unbounded swap is the thing this function exists to prevent.
+        if (!ok || data.length < 32) revert TransferFailed();
+        return abi.decode(data, (uint256));
+    }
+
+    function _safeApprove(address token, address spender, uint256 amount) private {
+        (bool ok, bytes memory data) =
+            token.call(abi.encodeWithSelector(0x095ea7b3, spender, amount));
+        if (!ok || (data.length != 0 && !abi.decode(data, (bool)))) revert TransferFailed();
+    }
+
     // ----------------------------------------------------------------- views
     function remaining(address agent) external view returns (uint256) {
         Grant storage g = grants[agent];

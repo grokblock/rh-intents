@@ -396,9 +396,9 @@
         <h3>Outlive a revoke</h3>
         <p>Intents already signed die with the mandate. The generation is inside the signature.</p>
       </div>
-      <div class="card neg">
-        <h3>Trade &mdash; not yet</h3>
-        <p>No swap intent exists. The chain's router is identified but nothing here drives it. Today this moves value to approved payees; it does not trade.</p>
+      <div class="card pos">
+        <h3>Trade under the cap</h3>
+        <p>Swap through the chain's router. Buying meters the cap; selling back into the mandate asset does not, so a soft-killed agent can still unwind.</p>
       </div>
       <div class="card neg">
         <h3>Hold an allowance</h3>
@@ -468,13 +468,13 @@
           <tr><th>Thing</th><th>State</th><th>Detail</th></tr>
         </thead>
         <tbody>
-          <tr><td>Contract</td><td><span class="tag live">written</span></td><td>9,182 bytes &middot; 37.4% of the EIP-170 limit</td></tr>
-          <tr><td>Tests</td><td><span class="tag live">50 passing</span></td><td>against a real in-process EVM at chain 4663</td></tr>
+          <tr><td>Contract</td><td><span class="tag live">written</span></td><td>11,076 bytes &middot; 45.1% of the EIP-170 limit</td></tr>
+          <tr><td>Tests</td><td><span class="tag live">67 passing</span></td><td>against a real in-process EVM at chain 4663</td></tr>
           <tr><td>Mainnet deploy</td><td><span class="tag no">not done</span></td><td>no address exists</td></tr>
           <tr><td>Testnet deploy</td><td><span class="tag no">blocked</span></td><td>no reachable faucet &mdash; a fresh wallet reads 0 wei</td></tr>
           <tr><td>Audit</td><td><span class="tag no">none</span></td><td>unreviewed by anyone but its author</td></tr>
           <tr><td>Real payment</td><td><span class="tag no">never</span></td><td>no money has moved through this</td></tr>
-          <tr><td>Trading / swaps</td><td><span class="tag no">not built</span></td><td>router found, not driven &mdash; see below</td></tr>
+          <tr><td>Trading / swaps</td><td><span class="tag live">written</span></td><td>17 tests, incl. hostile routers &mdash; never run on chain</td></tr>
           <tr><td>Token</td><td><span class="tag no">none</span></td><td>there is no token and none is planned</td></tr>
         </tbody>
       </table>
@@ -497,26 +497,38 @@
 
     <h2 style="margin-top:44px">On trading</h2>
     <p>
-      The keyless part is finished and the trading part is not, so it is worth
-      being exact about which is which. What works today is <em>execution under a
-      mandate</em>: an agent moves an approved asset to an approved payee, up to a
-      cap, without holding a key. Swapping is the obvious next capability and is
-      not built.
+      A swap intent exists now. It works the way the payment side does: the
+      mandate bounds it, and buying meters the cap while selling back into the
+      mandate asset does not &mdash; so an agent whose cap has been revised to zero
+      can still unwind a position it already holds, where a revoke would strand
+      it.
     </p>
     <p>
-      The chain does have a router &mdash;
-      <span class="mono">0x8876789976decbfcbbbe364623c63652db8c0904</span>, verified
-      deployed. Two things make it more than an afternoon's work, and both are
-      reasons to do it carefully rather than quickly: it is a
-      <strong>modified</strong> UniversalRouter fork carrying an extra
-      <span class="mono">minHopPriceX36</span> field in its v4 swap struct, so
-      standard Uniswap SDK calldata reverts against it; and Robinhood documents
-      that look-alike routers also exist on this chain, so the address itself has
-      to be pinned rather than looked up.
+      <strong>The contract does not build routes.</strong> This chain's router is
+      a modified UniversalRouter whose v4 swap struct carries an extra
+      <span class="mono">minHopPriceX36</span> field, so calldata from the
+      standard Uniswap SDK reverts against it, and the encoding can change again.
+      A contract that encoded routes itself would be wrong the first time the
+      router moved. So the caller supplies the calldata and the vault enforces the
+      <em>outcome</em> instead: at most the authorised amount may leave, at least
+      <span class="mono">minOut</span> must arrive, both measured from real
+      balances after the call rather than believed from a return value. The router
+      address is a hardcoded constant, so caller-supplied calldata reaches exactly
+      one program.
     </p>
     <p>
-      Until a swap has actually been simulated through a mandate, this page will
-      not describe this as trading.
+      One honest exception to a rule stated above: a swap cannot avoid an ERC-20
+      approval, because the router has to pull the input. The allowance is granted
+      for exactly the input amount and set back to zero in the same transaction,
+      so nothing survives the call and revocation stays final.
+    </p>
+    <p>
+      It has never run against the real router. The tests use a deliberately
+      hostile stand-in placed at the real address &mdash; one that takes the input and
+      returns nothing, one that returns less than promised, one that tries to
+      overdraw the allowance, one that reverts &mdash; and the vault refuses all of
+      them. That is not the same as a live swap, and this page will say so until
+      one has happened.
     </p>
 
     <h2 style="margin-top:44px">Known limit</h2>

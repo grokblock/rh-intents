@@ -51,7 +51,15 @@ for (const [file, contracts] of Object.entries(out.contracts ?? {})) {
     const deployed = c.evm.deployedBytecode.object.length / 2;
     writeFileSync(
       join(outDir, `${name}.json`),
-      JSON.stringify({ abi: c.abi, bytecode: "0x" + c.evm.bytecode.object }, null, 2),
+      JSON.stringify(
+        {
+          abi: c.abi,
+          bytecode: "0x" + c.evm.bytecode.object,
+          deployedBytecode: "0x" + c.evm.deployedBytecode.object,
+        },
+        null,
+        2,
+      ),
     );
     const pct = ((deployed / EIP170) * 100).toFixed(1);
     console.log(

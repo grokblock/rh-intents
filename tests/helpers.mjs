@@ -89,6 +89,28 @@ export class Chain {
     });
   }
 
+  /**
+   * Install runtime bytecode at a fixed address.
+   *
+   * GrantVault hardcodes ROUTER, and that constant is a security property: the
+   * swap forwards caller-supplied calldata, and it is only safe because the
+   * destination cannot be redirected. Making the address configurable to suit
+   * the tests would test a contract nobody deploys. So the mock is etched at
+   * the real address instead.
+   */
+  async etch(address, name) {
+    const art = artifact(name);
+    await this.vm.stateManager.putAccount(
+      Address.fromString(address),
+      Account.fromAccountData({ nonce: 1n, balance: 0n }),
+    );
+    await this.vm.stateManager.putContractCode(
+      Address.fromString(address),
+      hexToBytes(art.deployedBytecode),
+    );
+    return new Contract(this, address, art.abi);
+  }
+
   async deploy(from, name, args = []) {
     const art = artifact(name);
     const iface = new Interface(art.abi);

@@ -85,6 +85,9 @@ const HELP = `
 
     pay --merchant 0x… --amount 5             agent signs, relayer submits
 
+    tradeable --token 0x… --on|--off        approve an asset for swapping
+    swap --in 0x… --out 0x… --amount 100 --min-out 95 --data 0x…
+
     sub create --agent 0x… --merchant 0x… --amount 15 --days 30
     sub pay --id 1                            charge the current period
     sub show --id 1
@@ -280,6 +283,99 @@ async function main() {
     console.log(`\n  PAID  ${r.hash}`);
     console.log(`  ${flags.amount} -> ${merchant}`);
     console.log(`  agent ${agent} signed; relayer ${relayer.address} paid the gas\n`);
+    return;
+  }
+
+  // ------------------------------------------------------------------ swap
+  if (cmd === "tradeable") {
+    const owner = loadWallet(process.env.OWNER_KEY, "OWNER").connect(provider);
+    const v = vaultAt(needVault(), owner);
+    const token = flags.token ?? die("--token required");
+    const on = flags.off !== "true";
+    if (PLAN) {
+      const effect = on
+        ? "the agent could then hold this asset as swap output"
+        : "the next swap into this asset fails immediately";
+      console.log("");
+      console.log(`  would set ${token} tradeable = ${on}`);
+      console.log(`  ${effect}`);
+      console.log("");
+      return;
+    }
+    console.log(`  set  ${(await (await v.setTradeable(token, on)).wait()).hash}`);
+    return;
+  }
+
+  if (cmd === "swap") {
+    const agent = loadWallet(process.env.AGENT_KEY, "AGENT").connect(provider);
+    const v = vaultAt(needVault(), provider);
+    const tokenIn = flags.in ?? die("--in required (token being sold)");
+    const tokenOut = flags.out ?? die("--out required (token being bought)");
+
+    // This does not build routes, and says why rather than failing with a bare
+    // "missing argument".
+    const data =
+      flags.data ??
+      die(
+        [
+          "--data required: the router calldata.",
+          "",
+          "  This does NOT build routes. The chain router is a modified",
+          "  UniversalRouter whose v4 swap struct carries an extra",
+          "  minHopPriceX36 field, so standard Uniswap SDK calldata reverts.",
+          "  Get calldata from a quoter that knows this chain and pass it here.",
+          "  The vault bounds the outcome whatever the route does.",
+        ].join("\n"),
+      );
+    if (!data.startsWith("0x") || data.length < 10) {
+      die("--data must be 0x-prefixed router calldata");
+    }
+
+    const g = await v.grants(await agent.getAddress());
+    if (g.expiresAt === 0n) die("this agent has no mandate");
+
+    const { amount: amountIn } = await units(
+      tokenIn,
+      flags.amount ?? die("--amount required"),
+      provider,
+    );
+    // No default slippage floor. A minOut of zero authorises losing everything,
+    // so the caller has to state the number.
+    const minHuman =
+      flags["min-out"] ?? die("--min-out required — refusing to swap with no slippage floor");
+    const { amount: minOut } = await units(tokenOut, minHuman, provider);
+
+    if (tokenOut.toLowerCase() !== g.token.toLowerCase() && !(await v.isTradeable(tokenOut))) {
+      die(`${tokenOut} is not approved for trading. Run: tradeable --token ${tokenOut}`);
+    }
+    const meters = tokenIn.toLowerCase() === g.token.toLowerCase();
+    if (meters) {
+      const rem = await v.remaining(await agent.getAddress());
+      if (amountIn > rem) die(`amount exceeds remaining headroom (${rem} raw)`);
+    }
+
+    if (PLAN) {
+      const metering = meters
+        ? "metered (spending the mandate asset)"
+        : "NOT metered (returning to the mandate asset)";
+      console.log("");
+      console.log(`  would swap ${flags.amount} of ${tokenIn}`);
+      console.log(`  for at least ${minHuman} of ${tokenOut}`);
+      console.log(`  router    ${await v.ROUTER()}`);
+      console.log(`  cap       ${metering}`);
+      console.log(`  calldata  ${data.length / 2 - 1} bytes, supplied by you`);
+      console.log("");
+      console.log(`  the vault bounds it: at most ${flags.amount} leaves, at least`);
+      console.log(`  ${minHuman} must arrive, measured from real balances`);
+      console.log("");
+      console.log("  (plan only — nothing sent)");
+      console.log("");
+      return;
+    }
+    const tx = await vaultAt(needVault(), agent).swap(tokenIn, tokenOut, amountIn, minOut, data);
+    console.log("");
+    console.log(`  SWAPPED  ${(await tx.wait()).hash}`);
+    console.log("");
     return;
   }
 
